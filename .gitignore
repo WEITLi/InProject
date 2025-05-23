@@ -1,1 +1,7 @@
-data
+data/DataByWeek
+data/ExtractedData
+data/NumDataByWeek
+data/tmp
+data/answers
+data/r4.2
+data/LDAP
