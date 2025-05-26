@@ -4,7 +4,7 @@
 data:
   data_version: "r4.2"
   max_users: 500
-  max_weeks: 16
+  max_weeks: 4
   feature_dim: 256
   num_cores: 12
   sample_ratio: 1.0

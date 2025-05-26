@@ -13,7 +13,7 @@ training:
 
 data:
   max_users: 500  # 较少用户以加快调优
-  max_weeks: 16
+  max_weeks: 4
   sample_ratio: 1  # 使用50%数据以加快调优
 
 # Optuna特定配置
