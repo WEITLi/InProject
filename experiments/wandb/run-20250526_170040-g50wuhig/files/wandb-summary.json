@@ -1,1 +1,0 @@
-{"generalization_test_recall":0.725,"generalization_test_f1":0.6094202898550725,"_wandb":{"runtime":230},"generalization_test_precision":0.525625,"_timestamp":1.74825027075698e+09,"_runtime":230.467755,"_step":0,"generalization_test_auc":0.6802507836990596,"generalization_test_accuracy":0.725}
