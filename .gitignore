@@ -19,3 +19,5 @@ NumDataByWeek/
 SessionLevelFeatures/
 DayLevelFeatures/
 WeekLevelFeatures/
+experiments/wandb/  
+experiments/results/
