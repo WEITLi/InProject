@@ -288,8 +288,12 @@ class MultiModalDataPipeline:
                 'user_to_index': {}
             }
 
+        # 生成包含模态信息的缓存文件名后缀
+        enabled_modalities_sorted = sorted(self.config.model.enabled_modalities if self.config.model.enabled_modalities else ['none'])
+        modalities_suffix = "_mods_" + "-".join(enabled_modalities_sorted)
+
         training_data_file = os.path.join(self.multimodal_dir, "TrainingData",
-                                        f"training_data_w{start_week}_{end_week}_u{len(final_user_list)}.pickle")
+                                        f"training_data_w{start_week}_{end_week}_u{len(final_user_list)}{modalities_suffix}.pickle")
         logger.info(f"[MultiModalDataPipeline.prepare_training_data] 构造的 training_data_file 路径: {training_data_file}")
         
         if os.path.exists(training_data_file) and not self.config.data.force_regenerate_training_data:

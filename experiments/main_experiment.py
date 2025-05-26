@@ -15,6 +15,7 @@ Main Experiment Controller for Multimodal Internal Threat Detection System
 
 import os
 import sys
+import copy
 
 # --- Start of sys.path modification for robust imports ---
 current_script_dir = os.path.dirname(os.path.abspath(__file__)) # .../experiments
@@ -571,8 +572,7 @@ def run_ablation_experiment(config: Config, output_dir: str, logger: logging.Log
             os.makedirs(combo_output_dir, exist_ok=True)
             
             # 修改配置以只使用特定模态
-            combo_config = Config()
-            combo_config.__dict__.update(config.__dict__)
+            combo_config = copy.deepcopy(config)
             combo_config.model.enabled_modalities = combination['modalities']
             
             try:
