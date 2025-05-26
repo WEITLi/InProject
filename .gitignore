@@ -16,5 +16,6 @@ DataByWeek_parquet_r05/
 ExtractedData/
 MultiModalData/
 NumDataByWeek/
-SeessionLevelFeatures/
+SessionLevelFeatures/
+DayLevelFeatures/
 WeekLevelFeatures/
