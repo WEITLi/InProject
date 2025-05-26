@@ -181,7 +181,16 @@ class MultiModalTrainer:
         }
         
         print(f"多模态训练器初始化完成")
-        print(f"  设备: {self.device}")
+        
+        # 修改设备指示的打印方式
+        device_type = self.device.type
+        if device_type == 'cuda':
+            print(f"  设备: {self.device} (已启用 GPU 加速)")
+        elif device_type == 'mps':
+            print(f"  设备: {self.device} (已启用 Apple Silicon GPU 加速)")
+        else:
+            print(f"  设备: {self.device} (使用 CPU)")
+            
         print(f"  输出目录: {os.path.abspath(output_dir)}")
     
     def prepare_data_loaders(self, training_data: Dict[str, Any]) -> Tuple[DataLoader, DataLoader, DataLoader]:
