@@ -1,0 +1,36 @@
+# 消融实验配置
+# Ablation Study Configuration
+
+data:
+  data_version: "r4.2"
+  max_users: 1000
+  max_weeks: 72
+  feature_dim: 256
+  num_cores: 8
+  sample_ratio: 1.0
+  force_regenerate_combined_weeks: false
+  force_regenerate_analysis_levels: false
+
+model:
+  hidden_dim: 256
+  num_heads: 8
+  num_layers: 6
+  sequence_length: 128
+  dropout: 0.1
+  # enabled_modalities 将在运行时动态设置
+
+training:
+  epochs: 30  # 消融实验使用较少的epoch以节省时间
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  device: "auto"
+  val_split: 0.15
+  test_split: 0.15
+  early_stopping_patience: 8
+  save_best_model: true
+
+experiment:
+  seed: 42
+  num_workers: 4
+  log_level: "INFO" 

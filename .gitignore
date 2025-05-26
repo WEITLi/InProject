@@ -10,3 +10,11 @@ data/r4.2/file.csv
 data/r4.2/http.csv
 data/r4.2/logon.csv
 data/r4.2/psychometric.csv
+data/r4.2/r4.2.zip
+DataByWeek_parquet/
+DataByWeek_parquet_r05/
+ExtractedData/
+MultiModalData/
+NumDataByWeek/
+SeessionLevelFeatures/
+WeekLevelFeatures/

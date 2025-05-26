@@ -1,0 +1,21 @@
+model:
+  enabled_modalities: ["behavior", "structured"]  # 使用核心模态
+  hidden_dim: 128
+  num_heads: 4
+  num_layers: 3
+  dropout: 0.2
+
+training:
+  epochs: 3  # 较少轮数，重点在数据处理
+  batch_size: 32
+  learning_rate: 0.001
+  device: "auto"
+
+data:
+  max_users: 1000
+  max_weeks: 72
+  sample_ratio: 1.0
+
+# 不平衡实验特定配置
+imbalance_ratios: [1.0, 2.0, 3.0, 4.0, 5.0]  # 正常:恶意比例
+sampling_strategies: ["none", "smote", "adasyn", "random_undersample"] 

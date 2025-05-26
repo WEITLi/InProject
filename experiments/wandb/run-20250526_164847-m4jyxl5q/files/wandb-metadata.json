@@ -1,0 +1,50 @@
+{
+  "os": "macOS-14.6-arm64-arm-64bit",
+  "python": "CPython 3.9.6",
+  "startedAt": "2025-05-26T08:48:48.038568Z",
+  "args": [
+    "--run_type",
+    "generalization",
+    "--config_file",
+    "configs/small_test_generalization.yaml"
+  ],
+  "program": "/Users/weitao_li/CodeField/DCAI/Huawei/Anomaly_Detection/InProject/experiments/main_experiment.py",
+  "codePath": "experiments/main_experiment.py",
+  "git": {
+    "remote": "https://github.com/WEITLi/InProject.git",
+    "commit": "ff8dbd3f03f20ac7de096e4d3e4de49df763c0f5"
+  },
+  "email": "835605258@qq.com",
+  "root": "/Users/weitao_li/CodeField/DCAI/Huawei/Anomaly_Detection/InProject/experiments",
+  "host": "liweitaodeMacBook-Air.local",
+  "executable": "/Users/weitao_li/CodeField/DCAI/.venv/bin/python",
+  "codePathLocal": "main_experiment.py",
+  "cpu_count": 8,
+  "cpu_count_logical": 8,
+  "disk": {
+    "/": {
+      "total": "245107195904",
+      "used": "235023122432"
+    },
+    "/System/Volumes/Data": {
+      "total": "245107195904",
+      "used": "235023122432"
+    }
+  },
+  "memory": {
+    "total": "17179869184"
+  },
+  "cpu": {
+    "count": 8,
+    "countLogical": 8
+  },
+  "apple": {
+    "name": "Apple M3",
+    "ecpuCores": 4,
+    "pcpuCores": 4,
+    "gpuCores": 10,
+    "memoryGb": 16,
+    "swapTotalBytes": "10737418240",
+    "ramTotalBytes": "17179869184"
+  }
+}

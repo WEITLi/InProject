@@ -1,0 +1,28 @@
+experiment:
+  seed: 42
+  num_workers: 4
+  log_level: "INFO"
+# seed:
+#  42
+model:
+  enabled_modalities: ["behavior", "structured"]  # 使用核心模态
+  hidden_dim: 64
+  num_heads: 2
+  num_layers: 1
+  dropout: 0.2
+
+training:
+  epochs: 1  # 较少轮数，重点在数据处理
+  batch_size: 16
+  learning_rate: 0.001
+  device: "auto"
+
+data:
+  max_users: 50
+  max_weeks: 4
+  sample_ratio: 1.0
+
+# 不平衡实验特定配置
+imbalance:
+  imbalance_ratios: [1.0, 2.0]  # 正常:恶意比例
+  sampling_strategies: ["none", "smote", "adasyn", "random_undersample"] 

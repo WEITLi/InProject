@@ -1,0 +1,36 @@
+# 快速测试配置
+# Quick Test Configuration for Development and Debugging
+
+data:
+  data_version: "r4.2"
+  max_users: 500  # 少量用户用于快速测试
+  max_weeks: 18  # 较短时间窗口
+  feature_dim: 128  # 较小特征维度
+  num_cores: 4
+  sample_ratio: 0.5  # 
+  force_regenerate_combined_weeks: false
+  force_regenerate_analysis_levels: false
+
+model:
+  hidden_dim: 128  # 较小模型
+  num_heads: 4
+  num_layers: 3
+  sequence_length: 64
+  dropout: 0.1
+  enabled_modalities: ["behavior", "structured"]  # 只使用两个模态
+
+training:
+  epochs: 5  # 很少的epoch用于快速验证
+  batch_size: 16
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  device: "auto"
+  val_split: 0.2
+  test_split: 0.2
+  early_stopping_patience: 3
+  save_best_model: false  # 不保存模型以节省空间
+
+experiment:
+  seed: 42
+  num_workers: 2
+  log_level: "DEBUG" 

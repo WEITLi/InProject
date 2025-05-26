@@ -1,0 +1,21 @@
+model:
+  enabled_modalities: ["behavior", "structured"]  # 使用较少模态以加快调优速度
+  hidden_dim: 128  # 初始值，会被Optuna覆盖
+  num_heads: 4
+  num_layers: 3
+  dropout: 0.2
+
+training:
+  epochs: 3  # 较少轮数以加快调优
+  batch_size: 32
+  learning_rate: 0.001
+  device: "auto"
+
+data:
+  max_users: 1000  # 较少用户以加快调优
+  max_weeks: 72
+  sample_ratio: 1  # 使用50%数据以加快调优
+
+# Optuna特定配置
+n_trials: 10  # 调优试验次数
+timeout: 3600  # 1小时超时 

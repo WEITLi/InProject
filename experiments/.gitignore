@@ -1,0 +1,74 @@
+# 字节码和缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE 和编辑器特定文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 操作系统特定文件
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 虚拟环境
+.env
+.venv
+env/
+venv/
+ENV/
+VENV/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 测试和覆盖率报告
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+junit*.xml
+
+# 构建和分发
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.manifest
+*.spec
+
+# 特定于项目的临时文件或大文件
+results/                  # 实验结果通常不需要版本控制
+wandb/                    # WandB 本地目录
+*.ipynb_checkpoints/      # Jupyter Notebook 检查点
+# data/                   # 如果数据集很大，通常不纳入版本控制
+# *.pt                    # PyTorch 模型文件 (如果很大)
+# *.pth                   # PyTorch 模型文件 (如果很大)
+# *.onnx                  # ONNX 模型文件 (如果很大)
+# *.csv                   # 如果是大型数据文件或结果文件
+# *.png                   # 如果是大量生成的图像
+# *.jpeg
+# *.jpg
+
+# 其他
+*.bak
+*.tmp

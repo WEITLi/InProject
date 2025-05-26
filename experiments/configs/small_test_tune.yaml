@@ -1,0 +1,28 @@
+experiment:
+  seed: 42
+  num_workers: 4
+  log_level: "INFO"
+# seed:
+#  42
+model:
+  enabled_modalities: ["behavior", "structured"]  # 使用较少模态以加快调优速度
+  hidden_dim: 32  # 初始值，会被Optuna覆盖
+  num_heads: 2
+  num_layers: 1
+  dropout: 0.2
+
+training:
+  epochs: 2  # 较少轮数以加快调优
+  batch_size: 16
+  learning_rate: 0.001
+  device: "auto"
+
+data:
+  max_users: 50  # 较少用户以加快调优
+  max_weeks: 4
+  sample_ratio: 1  # 使用50%数据以加快调优
+
+# Optuna特定配置
+tuning:
+  n_trials: 3 # 已大大减少
+  timeout: 3600 # (1小时超时可能不会达到)

@@ -1,0 +1,24 @@
+experiment:
+  seed: 42
+  num_workers: 4
+  log_level: "INFO"
+data:
+  data_version: "r4.2"
+  max_users: 50
+  max_weeks: 4
+  sample_ratio: 1.0 # 或者 0.5 如果15个用户全量数据仍然太多
+  feature_dim: 64
+  num_cores: 4 # 根据您的环境
+model:
+  hidden_dim: 32
+  num_heads: 2
+  num_layers: 1
+  sequence_length: 32 # 确保与 data.sequence_length (如果定义) 或模型期望一致
+  enabled_modalities: ["behavior", "structured"] # 为了快速，只用两个模态
+training:
+  epochs: 1
+  batch_size: 4
+  learning_rate: 0.001
+  device: "auto"
+  val_split: 0.3 # 确保有足够的验证/测试样本
+  test_split: 0.3

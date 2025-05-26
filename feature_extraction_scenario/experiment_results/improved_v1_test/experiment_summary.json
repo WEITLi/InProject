@@ -1,0 +1,39 @@
+{
+    "experiment_name": "improved_v1_test",
+    "args": {
+        "data_version": "r4.2",
+        "start_week_data": 0,
+        "end_week_data": 3,
+        "max_users": 300,
+        "sequence_length": 128,
+        "source_data_dir": "../data/r4.2",
+        "work_data_dir": "workdata_experiment",
+        "val_split_ratio": 0.2,
+        "data_sample_ratio": 1.0,
+        "feature_dim": 256,
+        "hidden_dim": 128,
+        "epochs": 5,
+        "batch_size": 32,
+        "lr": 0.001,
+        "seed": 42,
+        "dataloader_workers": 0,
+        "num_cores": 8,
+        "device": "auto",
+        "force_regenerate_base_data": false,
+        "force_regenerate_analysis_levels": false,
+        "output_dir_base": "./experiment_results",
+        "experiment_name": "improved_v1_test"
+    },
+    "device_used": "mps",
+    "total_training_time_seconds": 1.225879192352295,
+    "avg_epoch_train_time_seconds": 0.17783408164978026,
+    "avg_val_inference_time_seconds": 0.06227717399597168,
+    "best_validation_f1_during_training": 0.23529411764705882,
+    "final_validation_metrics": {
+        "accuracy": 0.7833333333333333,
+        "precision": 0.6666666666666666,
+        "recall": 0.14285714285714285,
+        "f1_score": 0.23529411764705882
+    },
+    "model_path": "./experiment_results/improved_v1_test/models/improved_v1_test_best_model.pth"
+}
