@@ -51,36 +51,34 @@ except ImportError:
 class MultiModalDataset(Dataset):
     """多模态数据集类"""
     
-    def __init__(self, training_data: Dict[str, Any], device: str = 'cpu'):
+    def __init__(self, training_data: Dict[str, Any]):
         """
         初始化多模态数据集
         
         Args:
             training_data: 训练数据字典
-            device: 设备类型
         """
-        self.device = device
+        # self.device = device # Removed: Tensors will stay on CPU here
         
-        # 转换数据为tensor
-        self.behavior_sequences = torch.FloatTensor(training_data['behavior_sequences']).to(device)
-        self.node_features = torch.FloatTensor(training_data['node_features']).to(device)
-        self.adjacency_matrix = torch.FloatTensor(training_data['adjacency_matrix']).to(device)
+        # 转换数据为tensor (保持在 CPU 上)
+        self.behavior_sequences = torch.FloatTensor(training_data['behavior_sequences'])
+        self.node_features = torch.FloatTensor(training_data['node_features'])
+        self.adjacency_matrix = torch.FloatTensor(training_data['adjacency_matrix'])
         self.text_content = training_data['text_content']  # 保持为字符串列表
-        self.structured_features = torch.FloatTensor(training_data['structured_features']).to(device)
-        self.labels = torch.LongTensor(training_data['labels']).to(device)
+        self.structured_features = torch.FloatTensor(training_data['structured_features'])
+        self.labels = torch.LongTensor(training_data['labels'])
         
         self.users = training_data['users']
         self.user_to_index = training_data['user_to_index']
 
         if 'user_indices_in_graph' in training_data:
-            self.user_indices_in_graph = torch.LongTensor(training_data['user_indices_in_graph']).to(device)
+            self.user_indices_in_graph = torch.LongTensor(training_data['user_indices_in_graph'])
             print(f"  用户图索引已加载，长度: {len(self.user_indices_in_graph)}")
         else:
             print("警告: training_data 中缺少 'user_indices_in_graph'。GNN 可能无法正确对齐用户。")
-            # 创建一个占位符，GNN部分需要能处理无效索引（例如，通过 MultiModalAnomalyDetector 中的 batch_user_indices_in_graph >= 0 判断）
-            self.user_indices_in_graph = torch.full((len(self.labels),), -1, dtype=torch.long).to(device)
+            self.user_indices_in_graph = torch.full((len(self.labels),), -1, dtype=torch.long)
         
-        print(f"数据集初始化完成:")
+        print(f"数据集初始化完成 (数据将在训练循环中移至设备):")
         print(f"  样本数: {len(self.labels)}")
         print(f"  行为序列形状: {self.behavior_sequences.shape}")
         print(f"  节点特征形状: {self.node_features.shape}")
@@ -205,8 +203,8 @@ class MultiModalTrainer:
         """
         print("准备数据加载器...")
         
-        # 创建数据集
-        dataset = MultiModalDataset(training_data, device=self.device)
+        # 创建数据集 (不再传递 device)
+        dataset = MultiModalDataset(training_data)
         
         # 划分数据集
         total_size = len(dataset)
@@ -358,7 +356,10 @@ class MultiModalTrainer:
         all_labels = []
         all_probabilities = []
         
-        for batch_idx, batch in enumerate(train_loader):
+        for batch_idx, batch_cpu in enumerate(train_loader):
+            # 将批次中的张量移动到目标设备
+            batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch_cpu.items()}
+
             # 准备输入数据
             inputs = {
                 'behavior_sequences': batch['behavior_sequences'],
@@ -446,7 +447,10 @@ class MultiModalTrainer:
         all_probabilities = []
         
         with torch.no_grad():
-            for batch in val_loader:
+            for batch_cpu in val_loader:
+                # 将批次中的张量移动到目标设备
+                batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch_cpu.items()}
+
                 # 准备输入数据
                 inputs = {
                     'behavior_sequences': batch['behavior_sequences'],
