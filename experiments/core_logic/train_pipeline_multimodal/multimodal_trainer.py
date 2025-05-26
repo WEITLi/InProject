@@ -158,7 +158,18 @@ class MultiModalTrainer:
         """
         self.config = config or Config()
         self.output_dir = output_dir
-        self.device = torch.device(self.config.training.device if torch.cuda.is_available() else 'cpu')
+        
+        # 修改设备选择逻辑
+        device_setting = self.config.training.device
+        if device_setting == 'auto':
+            if torch.cuda.is_available():
+                self.device = torch.device('cuda')
+            elif torch.backends.mps.is_available(): # 检查 MPS (Apple Silicon GPUs)
+                self.device = torch.device('mps')
+            else:
+                self.device = torch.device('cpu')
+        else:
+            self.device = torch.device(device_setting)
         
         # 创建输出目录
         os.makedirs(output_dir, exist_ok=True)

@@ -2132,7 +2132,7 @@ if __name__ == "__main__":
     - enable_subsession: 是否启用子会话，0或1，默认1
     
     示例：
-    python feature_extraction.py 16 0 10 100 "session" 0  # 使用16核，处理0-10周，最多100用户，只处理session模式，不生成子会话
+    python feature_extraction.py 8 0 36 500 "session" 0  # 使用16核，处理0-10周，最多100用户，只处理session模式，不生成子会话
     """
     
     # ==================== 第一部分：环境检查与初始化 ====================
