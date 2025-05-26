@@ -161,27 +161,100 @@ print(f"实验结果将保存到: {drive_results_path}")
 
 ## 第四部分：运行实验脚本
 
-### 4.1 执行实验
+### 4.1 执行单个实验 (示例)
 根据您的项目配置，运行主实验脚本。
 请确保 `--config_path` 指向您在 Colab 环境中的配置文件路径。
 同时，根据需要调整 `--run_type` (例如 `train`, `evaluate`, `train_and_evaluate`, `ablation_study`)。
 
 ```python
+%env MPLBACKEND=Agg
 %cd /content/Mycert
 
 # 示例命令，请根据您的实际情况修改
-# 确保配置文件路径正确，例如 /content/Mycert/configs/your_config.json
+# 确保配置文件路径正确，例如 configs/your_config.yaml (相对路径)
+# 或 /content/Mycert/configs/your_config.yaml (绝对路径)
 # 如果您的数据不在默认位置，可能需要通过参数指定数据路径
 
 !python main_experiment.py \
-    --config_path "/content/Mycert/configs/gen_config.json" \
+    --config_path "configs/gen_config.yaml" \
     --run_type "train_and_evaluate" \
-    # --data_dir "/content/Mycert/data" # 如果需要，取消注释并设置数据目录
-    # --output_dir drive_results_path # 如果希望脚本直接输出到Drive，请确保脚本支持此参数
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs" \
+    # --data_dir "data" # 如果需要，取消注释并设置数据目录 (relative to Mycert)
 ```
 **注意：**
-1.  确保 `gen_config.json` (或您使用的配置文件) 中的路径是 Colab 环境中的绝对路径 (例如 `/content/Mycert/data/...`) 或者相对于 `main_experiment.py` 的正确相对路径。
-2.  如果您的脚本会将结果保存在特定文件夹 (如 `results/`)，您可能需要后续步骤将这些结果复制到 Google Drive。
+1.  确保配置文件 (`.yaml` 或 `.json`) 中的路径是 Colab 环境中的绝对路径 (例如 `/content/Mycert/data/...`) 或者相对于 `main_experiment.py` 的正确相对路径。
+2.  `--output_dir` 参数指定了实验输出的保存位置。请确保您的 `main_experiment.py` 脚本支持此参数。如果 Google Drive 未挂载或不想直接输出到 Drive，您可以注释掉此行或修改为本地路径 (如 `results/`)。
+3.  如果脚本将结果保存在 `--output_dir` 指定的文件夹外（例如，固定的 `results/` 目录），您仍可能需要第六部分的步骤来将这些结果复制到 Google Drive。
+
+### 4.2 更多实验示例
+
+以下是一些运行不同类型实验的示例命令。请根据您的需求调整配置文件和参数。
+所有示例均已添加 `--output_dir` 参数，将输出指向之前定义的 Google Drive 路径。
+
+#### 1. 训练和评估 (通用配置)
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+!python main_experiment.py \
+    --config_path "configs/gen_config.yaml" \
+    --run_type "train_and_evaluate" \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs"
+```
+
+#### 2. 消融研究 (使用消融配置)
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+!python main_experiment.py \
+    --config_path "configs/ablation_config.yaml" \
+    --run_type "ablation_study" \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs"
+```
+
+#### 3. 超参数调优 (使用调优配置)
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+!python main_experiment.py \
+    --config_path "configs/tune_config.yaml" \
+    --run_type "hyperparameter_tuning" \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 假设有这个run_type，请根据您的脚本实现调整
+```
+
+#### 4. 基线模型实验 (使用基线配置)
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+!python main_experiment.py \
+    --config_path "configs/baseline_config.yaml" \
+    --run_type "train_and_evaluate" \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 或其他适合基线的run_type
+```
+
+#### 5. 不平衡数据处理实验 (使用不平衡配置)
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+!python main_experiment.py \
+    --config_path "configs/imbalance_config.yaml" \
+    --run_type "train_and_evaluate" \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 或其他适合的run_type
+```
+
+#### 6. 快速测试 (使用快速测试配置)
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+!python main_experiment.py \
+    --config_path "configs/quick_test.yaml" \
+    --run_type "train_and_evaluate" \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 通常用于快速验证
+```
+**提示** mobilizing:
+*   请确保上述配置文件 (`gen_config.yaml`, `ablation_config.yaml`, `tune_config.yaml`, `baseline_config.yaml`, `imbalance_config.yaml`, `quick_test.yaml`) 存在于您的 `/content/Mycert/configs/` 目录中。
+*   `--run_type` 的具体可用值取决于您的 `main_experiment.py` 脚本的实现。请参考您的脚本或相关文档。例如，超参数调优的 `run_type` 可能是 `tune` 或其他特定名称。
+*   确保您的 `main_experiment.py` 脚本能够识别并使用 `--output_dir` 参数来保存所有相关输出 (如模型、日志、结果CSV、图像等)。
+*   如果实验需要指定特定的数据子集或输出目录，您可能需要添加如 `--data_version_suffix "subset_xyz"` 或 `--output_sub_dir "experiment_abc"` 等额外参数 (具体参数名需根据您的脚本确定)。
 
 ---
 
@@ -245,7 +318,7 @@ drive_output_dir = "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 
 
 # 要复制的文件或文件夹列表 (相对于 project_root)
 items_to_copy = {
-    "configs/gen_config.json": "gen_config_used.json", # 复制并重命名配置文件
+    "configs/gen_config.yaml": "gen_config_used.yaml", # 复制并重命名配置文件 (示例改为yaml)
     "results/experiment_metrics.csv": "experiment_metrics.csv",   # 假设的指标文件
     "results/training_loss_plot.png": "training_loss_plot.png"    # 假设的图像文件
     # "results/": "all_results_backup" # 也可以复制整个文件夹

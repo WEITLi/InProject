@@ -1,0 +1,1 @@
+# This directory contains sample data for the feature extraction scenario 

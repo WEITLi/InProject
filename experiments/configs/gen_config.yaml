@@ -4,7 +4,8 @@ experiment:
 
 data:
   data_version: "r4.2"
-  max_weeks: 72 # 或者您希望的周数
+  max_users: 500
+  max_weeks: 36 # 或者您希望的周数
   feature_dim: 128
   num_cores: 8 # 根据您的环境调整
   # sequence_length: 64 # 应与 model.sequence_length 匹配

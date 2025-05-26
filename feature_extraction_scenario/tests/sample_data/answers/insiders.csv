@@ -1,0 +1,4 @@
+# TEST_DATA_CREATED_BY_PIPELINE at 2025-05-25 01:01:29.571253
+user,scenario,start_week,end_week
+ACM2278,1,1,2
+CMP2946,2,0,1

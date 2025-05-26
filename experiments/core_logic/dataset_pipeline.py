@@ -252,33 +252,28 @@ class CERTDatasetPipeline:
             sample_ratio: 数据采样比例 (0-1)，用于快速测试
             force_regenerate: 是否强制重新生成周数据 Parquet 文件集
         """
+        # Original Dask initialization logic starts here
         try:
-            # Try to connect to an existing Dask client/cluster if available
-            # This is useful if the script is run within a larger Dask setup.
-            # If no existing client, LocalCluster will be created.
-            client = Client(timeout="2s", processes=False) # processes=False for LocalCluster to use threads for quicker startup
+            client = Client(timeout="2s", processes=False) 
             print(f"🎛️  Connected to existing Dask client: {client}")
-            # dashboard_link = client.dashboard_link
-            # if dashboard_link:
-            # print(f"Dask Dashboard: {dashboard_link}")
         except (OSError, TimeoutError):
             print(" başlatılıyor Dask LocalCluster... (No existing Dask client found or connection timed out)")
-            # Fallback to creating a new LocalCluster
-            # Using threads for workers can be faster for I/O bound tasks like CSV reading
-            # and avoids some of the overhead of multiprocessing on a single machine.
-            # Adjust n_workers and threads_per_worker based on your machine's cores.
-            # e.g., if you have 8 cores, you might use n_workers=4, threads_per_worker=2
-            # or n_workers=self.num_cores (if defined and appropriate)
-            cluster = LocalCluster(n_workers=self.num_cores, threads_per_worker=1, memory_limit='auto') #memory_limit can be adjusted
+            cluster = LocalCluster(n_workers=self.num_cores, threads_per_worker=1, memory_limit='auto') 
             client = Client(cluster)
             print(f"🎛️  New Dask LocalCluster started: {cluster}")
         
-        # Always print the dashboard link
-        if client and hasattr(client, 'dashboard_link') and client.dashboard_link:
+        # This part should be outside the try-except for client/cluster initialization 
+        # if 'client' is not guaranteed to be defined in all paths of the try-except.
+        # However, the original logic had it after the try-except, implying client would be defined.
+        # For robustness, it might be better to check if client was successfully initialized.
+        if 'client' in locals() and client and hasattr(client, 'dashboard_link') and client.dashboard_link:
             print(f"🔗 Dask Dashboard: {client.dashboard_link}")
-        else:
-            print("⚠️  Dask Dashboard link not available.")
-
+        elif 'client' in locals() and client: # Client exists but no dashboard link
+            print(f"⚠️  Dask Dashboard link not available, but client ({client}) exists.")
+        else: # Client likely not initialized
+            print("⚠️  Dask client not initialized or dashboard link not available.")
+        # Original Dask initialization logic ends here
+        
         if end_week is None:
             end_week = self.max_weeks
             
@@ -1337,8 +1332,9 @@ class CERTDatasetPipeline:
             force_regenerate_combined_weeks: 是否强制重新生成周数据 Parquet 文件集
             force_regenerate_analysis_levels: 是否强制重新生成多级别分析的CSV文件
         """
+        # Removing the try...finally block and calls to _initialize_dask and _shutdown_dask
         start_time = time.time()
-        self.current_sample_ratio = sample_ratio # 存储当前运行的采样率
+        self.current_sample_ratio = sample_ratio 
         
         if sample_ratio is not None and 0 < sample_ratio < 1.0:
             self.current_parquet_dir_name = f"DataByWeek_parquet_r{str(sample_ratio).replace('.', '')}"
@@ -1349,30 +1345,25 @@ class CERTDatasetPipeline:
         print(f"🚀 启动CERT数据集特征提取流水线")
         print(f"📊 参数: 周 {start_week}-{end_week or self.max_weeks-1}, 用户限制: {max_users or '无'}, 模式: {modes}, 采样率: {sample_ratio or 1.0}")
         
-        try:
-            # Step 1: 合并原始数据
-            self.step1_combine_raw_data(start_week, end_week, sample_ratio, force_regenerate=force_regenerate_combined_weeks)
+        # Original core logic of the pipeline
+        # Step 1: 合并原始数据
+        self.step1_combine_raw_data(start_week, end_week, sample_ratio, force_regenerate=force_regenerate_combined_weeks)
+        
+        # Step 2: 加载用户数据  
+        users_df = self.step2_load_user_data()
+        
+        # Step 3: 提取特征
+        self.step3_extract_features(users_df, start_week, end_week, max_users)
+        
+        # Step 4: 多级别分析
+        self.step4_multi_level_analysis(start_week, end_week, modes, force_regenerate_analysis_levels)
+        
+        total_time = (time.time() - start_time) / 60
+        print(f"\n🎉 流水线执行完成! 总耗时: {total_time:.1f} 分钟")
+        
+        # 输出结果统计
+        self._print_results_summary(start_week, end_week, modes)
             
-            # Step 2: 加载用户数据  
-            users_df = self.step2_load_user_data()
-            
-            # Step 3: 提取特征
-            self.step3_extract_features(users_df, start_week, end_week, max_users)
-            
-            # Step 4: 多级别分析
-            self.step4_multi_level_analysis(start_week, end_week, modes, force_regenerate_analysis_levels)
-            
-            total_time = (time.time() - start_time) / 60
-            print(f"\n🎉 流水线执行完成! 总耗时: {total_time:.1f} 分钟")
-            
-            # 输出结果统计
-            self._print_results_summary(start_week, end_week, modes)
-            
-        except Exception as e:
-            print(f"\n❌ 流水线执行失败: {e}")
-            import traceback
-            traceback.print_exc()
-    
     def _print_results_summary(self, start_week: int, end_week: int, modes: List[str]):
         """打印结果摘要"""
         print(f"\n📋 结果摘要:")
