@@ -1,3 +1,5 @@
+num_workers: 12
+
 experiment:
   num_gen_runs: 5
   base_seed: 1000

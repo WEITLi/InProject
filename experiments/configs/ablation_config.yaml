@@ -1,5 +1,6 @@
 # 消融实验配置
 # Ablation Study Configuration
+num_workers: 12
 
 data:
   data_version: "r4.2"

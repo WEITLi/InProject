@@ -1,3 +1,5 @@
+num_workers: 12
+
 model:
   enabled_modalities: ["behavior", "structured"]  # 使用核心模态
   hidden_dim: 128

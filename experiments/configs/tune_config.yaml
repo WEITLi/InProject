@@ -1,3 +1,5 @@
+num_workers: 12
+
 model:
   enabled_modalities: ["behavior", "structured"]  # 使用较少模态以加快调优速度
   hidden_dim: 128  # 初始值，会被Optuna覆盖
