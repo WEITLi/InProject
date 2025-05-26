@@ -1,9 +1,0 @@
-测试数据创建时间: 2025-05-25 01:01:29.571368
-此文件标记测试数据的存在，清理时会删除标记的文件
-TEST_FILE:email.csv
-TEST_FILE:file.csv
-TEST_FILE:http.csv
-TEST_FILE:logon.csv
-TEST_FILE:device.csv
-TEST_FILE:psychometric.csv
-TEST_FILE:answers/insiders.csv
