@@ -116,7 +116,8 @@ class AttentionFusion(nn.Module):
         )
         
         # 5. 最终变换
-        fused_features = self.final_fusion(weighted_features)
+        # fused_features = self.final_fusion(weighted_features) # Temporarily disable final_fusion
+        fused_features = weighted_features # Pass through for now
         
         return {
             "fused_features": fused_features,           # [batch_size, embed_dim]

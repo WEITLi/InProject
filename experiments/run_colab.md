@@ -260,95 +260,345 @@ print(f"实验结果将保存到: {drive_results_path}")
 
 ## 第五部分：结果展示与可视化
 
-### 5.1 加载实验结果 (示例)
-假设您的实验结果 (例如，一个 CSV 文件) 保存在项目的 `results/` 目录下。
+### 5.1 浏览实验输出目录
+在分析具体实验结果之前，建议先浏览一下 Google Drive 上的主要输出目录，了解实际生成了哪些子目录和文件。
+
+```python
+import os
+
+# Google Drive 上的主要输出目录 (与第三部分和第四部分一致)
+drive_results_base_path = "/content/drive/MyDrive/experiment_results/Mycert_outputs"
+
+if os.path.exists(drive_results_base_path):
+    print(f"主要实验输出目录: {drive_results_base_path}")
+    print("目录内容:")
+    for item in os.listdir(drive_results_base_path):
+        print(f"  - {item}")
+else:
+    print(f"错误: 主要实验输出目录 {drive_results_base_path} 未找到。请确保实验已正确运行并将结果保存到此路径。")
+
+# 您可以进一步列出特定子目录的内容
+# expected_sub_dirs = ["baseline_experiment", "ablation_experiment", "tune_experiment", "imbalance_experiment"]
+# for sub_dir_name in expected_sub_dirs:
+#     sub_dir_path = os.path.join(drive_results_base_path, sub_dir_name)
+#     if os.path.exists(sub_dir_path) and os.path.isdir(sub_dir_path):
+#         print(f"\n内容 {sub_dir_path}:")
+#         for item in os.listdir(sub_dir_path):
+#             print(f"  - {item}")
+#     else:
+#         print(f"\n警告: 子目录 {sub_dir_path} 未找到或不是一个目录。")
+```
+
+### 5.2 加载和分析特定实验的结果 (示例)
+以下代码演示了如何从 Google Drive 上的特定实验子目录加载结果 (例如 `experiment_name_results.json` 文件)，并进行可视化。
+请根据您实际生成的文件名和 JSON 结构进行调整。
 
 ```python
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
+import json # 新增导入 json 模块
 
-# 假设结果CSV文件路径，请根据您的脚本输出进行修改
-results_csv_path = "/content/Mycert/results/experiment_metrics.csv" # 修改为实际路径
-drive_results_path = "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 之前定义的Drive路径
+# Google Drive 上的主要输出目录
+drive_results_base_path = "/content/drive/MyDrive/experiment_results/Mycert_outputs"
 
-if os.path.exists(results_csv_path):
-    df_results = pd.read_csv(results_csv_path)
-    print("实验结果概览:")
-    print(df_results.head())
+# 定义要分析的实验子目录和预期的JSON结果文件名
+# 您可以根据需要修改或扩展此列表
+experiments_to_analyze = {
+    "baseline_experiment": "baseline_experiment_results.json",
+    "ablation_experiment": "ablation_experiment_results.json",
+    "tune_experiment": "tune_experiment_results.json",
+    "imbalance_experiment": "imbalance_experiment_results.json"
+}
 
-    # 示例：绘制某个指标的变化 (假设CSV中有 'epoch' 和 'loss' 列)
-    if 'epoch' in df_results.columns and 'loss' in df_results.columns:
-        plt.figure(figsize=(10, 6))
-        plt.plot(df_results['epoch'], df_results['loss'], marker='o')
-        plt.title('训练损失变化')
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.grid(True)
-        
-        # 保存图像到项目目录
-        plot_filename = "training_loss_plot.png"
-        plot_save_path = os.path.join("/content/Mycert/results/", plot_filename) # 保存到项目内部
-        plt.savefig(plot_save_path)
-        print(f"损失曲线图已保存到: {plot_save_path}")
-        
-        plt.show()
+for exp_name, json_filename in experiments_to_analyze.items():
+    exp_results_path = os.path.join(drive_results_base_path, exp_name)
+    json_file_path = os.path.join(exp_results_path, json_filename)
+    
+    print(f"\n--- 分析实验: {exp_name} ---")
+    
+    if os.path.exists(json_file_path):
+        print(f"找到结果文件: {json_file_path}")
+        try:
+            # 读取 JSON 文件
+            with open(json_file_path, 'r') as f:
+                results_data = json.load(f)
+            
+            df_results = None # Initialize df_results
+            # 尝试将结果数据转换为 Pandas DataFrame 以方便处理
+            if isinstance(results_data, list):
+                df_results = pd.DataFrame(results_data)
+            elif isinstance(results_data, dict):
+                if exp_name == "baseline_experiment":
+                    if "comparison_summary" in results_data and isinstance(results_data["comparison_summary"], dict):
+                        df_results = pd.DataFrame([{
+                            'model': model_name,
+                            'f1_score': metrics.get('f1_score'),
+                            'auc_score': metrics.get('auc_score')
+                        } for model_name, metrics in results_data["comparison_summary"].items()])
+                    else:
+                        print(f"  'comparison_summary' key not found or is not a dict in {json_filename} for baseline_experiment.")
+                        continue
+                elif exp_name == "abalation_experiment":
+                    if "combinations" in results_data and isinstance(results_data["combinations"], dict):
+                        df_results = pd.DataFrame([{
+                            'combination': combo_name,
+                            'best_val_f1': combo_data.get('best_val_f1'),
+                            'last_val_auc': combo_data.get('train_history', {}).get('val_auc', [None])[-1] if combo_data.get('train_history', {}).get('val_auc') else None,
+                            'modalities': "_".join(combo_data.get('modalities', [])) # Join modalities for easier display
+                        } for combo_name, combo_data in results_data["combinations"].items()])
+                    else:
+                        print(f"  'combinations' key not found or is not a dict in {json_filename} for ablation_experiment.")
+                        continue
+                elif exp_name == "tune_experiment":
+                    score = None
+                    if 'best_score' in results_data:
+                        score = results_data['best_score']
+                    elif 'tuning_results' in results_data and isinstance(results_data['tuning_results'], dict) and 'best_value' in results_data['tuning_results']:
+                        score = results_data['tuning_results']['best_value']
+                    
+                    if score is not None:
+                        df_results = pd.DataFrame([{
+                            'experiment_name': exp_name, # Used for x-axis in bar plot
+                            'best_score': score
+                        }])
+                    else:
+                        print(f"  'best_score' or 'tuning_results.best_value' not found in {json_filename} for tune_experiment.")
+                        continue
+                elif exp_name == "imbalance_experiment":
+                    if "summary_statistics" in results_data and isinstance(results_data["summary_statistics"], list):
+                        df_results = pd.DataFrame(results_data["summary_statistics"])
+                    elif "all_run_metrics" in results_data and isinstance(results_data["all_run_metrics"], list):
+                        df_results = pd.DataFrame(results_data["all_run_metrics"])
+                    else:
+                        print(f"  Neither 'summary_statistics' nor 'all_run_metrics' found or not a list in {json_filename} for imbalance_experiment.")
+                        continue
+                else:
+                    print(f"  Specific parsing logic for experiment type '{exp_name}' (when data is dict) is not defined. Trying generic dict to DataFrame conversion.")
+                    try:
+                        # Attempt a generic conversion if the structure is flat enough or a list of records under a known key
+                        # This is a fallback and might need specific handling if it fails often
+                        if len(results_data) == 1 and isinstance(list(results_data.values())[0], list):
+                             df_results = pd.DataFrame(list(results_data.values())[0])
+                        else:
+                             df_results = pd.DataFrame([results_data]) # Wrap dict in a list
+                    except Exception as e_conv:
+                        print(f"  Could not convert dict to DataFrame for {exp_name}: {e_conv}")
+                        continue
+            else:
+                print(f"  无法解析 {json_filename}，JSON 结构既不是列表也不是字典。")
+                continue
+
+            if df_results is None or df_results.empty:
+                print(f"  DataFrame is empty or None after parsing {json_filename}. Skipping further processing for this file.")
+                continue
+
+            print("结果概览 (转换后的DataFrame):")
+            print(df_results.head())
+
+            # 示例：绘制某个指标的变化
+            plot_made = False
+            # Plot for Baseline Experiment
+            if exp_name == "baseline_experiment" and 'model' in df_results.columns and 'f1_score' in df_results.columns and 'auc_score' in df_results.columns:
+                plt.figure(figsize=(10, 6))
+                # Ensure scores are numeric, coerce errors to NaN and fill with 0 for plotting
+                df_results['f1_score'] = pd.to_numeric(df_results['f1_score'], errors='coerce').fillna(0)
+                df_results['auc_score'] = pd.to_numeric(df_results['auc_score'], errors='coerce').fillna(0)
+                
+                bar_width = 0.35
+                index = range(len(df_results['model']))
+
+                plt.bar(index, df_results['f1_score'], bar_width, label='F1 Score')
+                plt.bar([i + bar_width for i in index], df_results['auc_score'], bar_width, label='AUC Score', alpha=0.7)
+                
+                plt.title(f'{exp_name} - Model Performance')
+                plt.xlabel('Model')
+                plt.ylabel('Score')
+                plt.xticks([i + bar_width / 2 for i in index], df_results['model'], rotation=45, ha="right")
+                plt.legend()
+                plt.grid(True)
+                plt.tight_layout()
+                
+                plot_filename = f"{exp_name}_performance_plot.png"
+                plot_save_path = os.path.join(exp_results_path, plot_filename)
+                plt.savefig(plot_save_path)
+                print(f"性能图已保存到: {plot_save_path}")
+                plt.show()
+                plot_made = True
+            # Plot for Tune Experiment
+            elif exp_name == "tune_experiment" and 'experiment_name' in df_results.columns and 'best_score' in df_results.columns:
+                plt.figure(figsize=(8, 6))
+                df_results['best_score'] = pd.to_numeric(df_results['best_score'], errors='coerce').fillna(0)
+                plt.bar(df_results['experiment_name'], df_results['best_score'], label='Best Score (F1/Value)')
+                plt.title(f'{exp_name} - Best Hyperparameter Tuning Score')
+                plt.xlabel('Experiment')
+                plt.ylabel('Best Score')
+                plt.legend()
+                plt.grid(True)
+                plt.tight_layout()
+
+                plot_filename = f"{exp_name}_best_score_plot.png"
+                plot_save_path = os.path.join(exp_results_path, plot_filename)
+                plt.savefig(plot_save_path)
+                print(f"最佳分数图已保存到: {plot_save_path}")
+                plt.show()
+                plot_made = True
+            # Plot for Ablation Experiment
+            elif exp_name == "abalation_experiment" and 'combination' in df_results.columns and 'best_val_f1' in df_results.columns:
+                plt.figure(figsize=(12, 8)) # Increased figure size
+                df_results['best_val_f1'] = pd.to_numeric(df_results['best_val_f1'], errors='coerce').fillna(0)
+                df_sorted = df_results.sort_values(by='best_val_f1', ascending=False) # Sort for better viz
+                plt.bar(df_sorted['combination'], df_sorted['best_val_f1'], label='Best Validation F1 Score')
+                plt.title(f'{exp_name} - Ablation Study Performance')
+                plt.xlabel('Modality Combination')
+                plt.ylabel('Best Validation F1 Score')
+                plt.xticks(rotation=45, ha="right")
+                plt.legend()
+                plt.grid(axis='y') # Grid only on y-axis for bar charts
+                plt.tight_layout()
+                
+                plot_filename = f"{exp_name}_ablation_f1_plot.png"
+                plot_save_path = os.path.join(exp_results_path, plot_filename)
+                plt.savefig(plot_save_path)
+                print(f"消融实验F1分数图已保存到: {plot_save_path}")
+                plt.show()
+                plot_made = True
+            # Plot for Imbalance Experiment (Summary Statistics)
+            elif exp_name == "imbalance_experiment" and 'index' in df_results.columns and ('mean' in df_results['index'].values):
+                df_mean_metrics = df_results[df_results['index'] == 'mean'].iloc[0] # Get the 'mean' row as a Series
+                metrics_to_plot = {}
+                if 'f1_score' in df_mean_metrics:
+                     metrics_to_plot['Mean F1 Score'] = pd.to_numeric(df_mean_metrics['f1_score'], errors='coerce').fillna(0)
+                if 'auc' in df_mean_metrics:
+                     metrics_to_plot['Mean AUC'] = pd.to_numeric(df_mean_metrics['auc'], errors='coerce').fillna(0)
+                if 'precision' in df_mean_metrics:
+                     metrics_to_plot['Mean Precision'] = pd.to_numeric(df_mean_metrics['precision'], errors='coerce').fillna(0)
+                if 'recall' in df_mean_metrics:
+                     metrics_to_plot['Mean Recall'] = pd.to_numeric(df_mean_metrics['recall'], errors='coerce').fillna(0)
+
+                if metrics_to_plot:
+                    plt.figure(figsize=(10, 6))
+                    plt.bar(metrics_to_plot.keys(), metrics_to_plot.values())
+                    plt.title(f'{exp_name} - Mean Performance Metrics (from Summary)')
+                    plt.ylabel('Score')
+                    plt.xticks(rotation=15, ha="right")
+                    plt.grid(axis='y')
+                    plt.tight_layout()
+                    
+                    plot_filename = f"{exp_name}_summary_metrics_plot.png"
+                    plot_save_path = os.path.join(exp_results_path, plot_filename)
+                    plt.savefig(plot_save_path)
+                    print(f"不平衡实验总结指标图已保存到: {plot_save_path}")
+                    plt.show()
+                    plot_made = True
+            # Plot for Imbalance Experiment (All Runs) - if summary wasn't plotted
+            elif exp_name == "imbalance_experiment" and 'seed' in df_results.columns and 'f1_score' in df_results.columns:
+                plt.figure(figsize=(12, 7))
+                df_results['f1_score'] = pd.to_numeric(df_results['f1_score'], errors='coerce').fillna(0)
+                if 'auc' in df_results.columns:
+                    df_results['auc'] = pd.to_numeric(df_results['auc'], errors='coerce').fillna(0)
+                    df_results.set_index('seed')[['f1_score', 'auc']].plot(kind='bar', ax=plt.gca()) # Use current axes
+                    plt.legend(['F1 Score', 'AUC'])
+                else:
+                    df_results.set_index('seed')[['f1_score']].plot(kind='bar', ax=plt.gca())
+                    plt.legend(['F1 Score'])
+                
+                plt.title(f'{exp_name} - Metrics per Run (Seed)')
+                plt.xlabel('Run (Seed)')
+                plt.ylabel('Score')
+                plt.xticks(rotation=0)
+                plt.grid(axis='y')
+                plt.tight_layout()
+
+                plot_filename = f"{exp_name}_all_runs_metrics_plot.png"
+                plot_save_path = os.path.join(exp_results_path, plot_filename)
+                plt.savefig(plot_save_path)
+                print(f"不平衡实验各轮次指标图已保存到: {plot_save_path}")
+                plt.show()
+                plot_made = True
+            
+            if not plot_made:
+                print(f"  在 {json_filename} 中未能找到预期的键组合用于绘图。DataFrame 列: {df_results.columns.tolist() if df_results is not None else 'df_results is None'}")
+
+        except Exception as e:
+            print(f"读取或处理 {json_file_path} 时出错: {e}")
     else:
-        print("未能找到 'epoch' 或 'loss' 列用于绘图。")
-else:
-    print(f"结果文件 {results_csv_path} 未找到。请检查脚本输出和文件路径。")
+        print(f"警告: 结果文件 {json_file_path} 未找到。请检查实验输出。")
 
 ```
 
-### 5.2 其他可视化
-根据您的项目需求，添加更多的可视化代码单元。例如，混淆矩阵、ROC 曲线等。
+### 5.3 其他可视化
+根据您的项目需求和各个实验子目录中的具体输出文件，添加更多的可视化代码单元。例如：
+*   比较不同实验的最终性能指标 (柱状图、表格)。
+*   绘制特定实验的混淆矩阵、ROC曲线等。
+*   分析模型权重、特征重要性 (如果已保存)。
 
 ---
 
-## 第六部分：保存输出到 Google Drive (如果已挂载)
+## 第六部分：验证输出与补充保存到 Google Drive
 
-如果实验脚本没有直接将所有输出保存到 Google Drive，您可以使用以下命令手动复制。
+由于实验脚本已配置为通过 `--output_dir` 直接将主要结果保存到 Google Drive，此部分侧重于验证输出的完整性，并补充保存一些可能未自动包含在 `--output_dir` 中的文件，例如运行实验时使用的最终配置文件。
 
 ```python
 import shutil
 import os
 
-project_root = "/content/Mycert/"
-drive_output_dir = "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 确保此路径与第三部分一致
+# 项目根目录 (Colab环境)
+project_root_colab = "/content/Mycert/"
+# Google Drive 上的主要输出目录 (与第三部分一致)
+drive_results_base_path = "/content/drive/MyDrive/experiment_results/Mycert_outputs"
 
-# 要复制的文件或文件夹列表 (相对于 project_root)
-items_to_copy = {
-    "configs/gen_config.yaml": "gen_config_used.yaml", # 复制并重命名配置文件 (示例改为yaml)
-    "results/experiment_metrics.csv": "experiment_metrics.csv",   # 假设的指标文件
-    "results/training_loss_plot.png": "training_loss_plot.png"    # 假设的图像文件
-    # "results/": "all_results_backup" # 也可以复制整个文件夹
+# 假设您在第四部分运行的实验对应的配置文件和输出子目录
+# 请根据实际情况调整
+experiments_configs_and_outputs = {
+    "baseline_experiment": "configs/baseline_config.yaml",
+    "ablation_experiment": "configs/ablation_config.yaml",
+    "tune_experiment": "configs/tune_config.yaml",
+    "imbalance_experiment": "configs/imbalance_config.yaml",
+    # "general_train_eval": "configs/gen_config.yaml" # 如果运行了通用训练评估
 }
 
-# 确保 Google Drive 已挂载
-if os.path.exists('/content/drive/MyDrive'):
-    for item_rel_path, target_name in items_to_copy.items():
-        source_path = os.path.join(project_root, item_rel_path)
-        destination_path = os.path.join(drive_output_dir, target_name)
-        
-        if os.path.exists(source_path):
-            try:
-                if os.path.isdir(source_path):
-                    # 如果目标已存在且是目录，先删除，shutil.copytree不覆盖
-                    if os.path.exists(destination_path):
-                        shutil.rmtree(destination_path)
-                    shutil.copytree(source_path, destination_path)
-                    print(f"文件夹已复制: {source_path} -> {destination_path}")
-                else:
-                    shutil.copy2(source_path, destination_path) # copy2保留元数据
-                    print(f"文件已复制: {source_path} -> {destination_path}")
-            except Exception as e:
-                print(f"复制 {source_path} 到 {destination_path} 失败: {e}")
-        else:
-            print(f"源文件/文件夹未找到: {source_path}")
+print("\n--- 验证输出并补充保存配置文件到Google Drive ---")
+if not os.path.exists('/content/drive/MyDrive'):
+    print("Google Drive 未挂载。跳过此步骤。")
 else:
-    print("Google Drive 未挂载。跳过保存到 Drive 的步骤。")
+    for exp_name, config_rel_path in experiments_configs_and_outputs.items():
+        # 构造配置文件在Colab项目中的完整路径
+        config_source_path = os.path.join(project_root_colab, config_rel_path)
+        # 构造此实验在Google Drive上的输出子目录路径
+        exp_drive_output_dir = os.path.join(drive_results_base_path, exp_name)
+        
+        print(f"\n处理实验: {exp_name}")
+        
+        # 1. 检查实验输出子目录是否存在
+        if os.path.exists(exp_drive_output_dir) and os.path.isdir(exp_drive_output_dir):
+            print(f"  ✅ 找到实验输出目录: {exp_drive_output_dir}")
 
-print(f"请检查 Google Drive 目录: {drive_output_dir}")
+            # 2. 复制该实验使用的配置文件到其Google Drive输出子目录中
+            if os.path.exists(config_source_path):
+                config_filename = os.path.basename(config_source_path)
+                config_destination_path = os.path.join(exp_drive_output_dir, f"used_{config_filename}")
+                try:
+                    shutil.copy2(config_source_path, config_destination_path) # copy2 保留元数据
+                    print(f"  ✅ 配置文件已复制: {config_source_path} -> {config_destination_path}")
+                except Exception as e:
+                    print(f"  ❌ 复制配置文件 {config_source_path} 失败: {e}")
+            else:
+                print(f"  ⚠️ 警告: 配置文件 {config_source_path} 未找到，无法复制。")
+            
+            # 3. (可选) 检查该目录下是否有一些预期的关键文件
+            # expected_files_in_output = ["metrics.csv", "model.pth", "summary.txt"] # 示例
+            # for fname in expected_files_in_output:
+            #     fpath_in_drive = os.path.join(exp_drive_output_dir, fname)
+            #     if os.path.exists(fpath_in_drive):
+            #         print(f"    Found expected file: {fpath_in_drive}")
+            #     else:
+            #         print(f"    Missing expected file: {fpath_in_drive}")
+
+        else:
+            print(f"  ⚠️ 警告: 实验 {exp_name} 的输出目录 {exp_drive_output_dir} 未找到。")
+
+print(f"\n请再次检查 Google Drive 目录: {drive_results_base_path} 及其子目录。")
 ```
 
 ---

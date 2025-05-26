@@ -6,8 +6,8 @@ model:
   dropout: 0.2
 
 training:
-  epochs: 3  # 较少轮数，重点在数据处理
-  batch_size: 32
+  epochs: 5  # 较少轮数，重点在数据处理
+  batch_size: 64
   learning_rate: 0.001
   device: "auto"
 

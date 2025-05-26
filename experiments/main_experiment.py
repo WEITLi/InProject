@@ -177,44 +177,36 @@ def load_config(config_file: Optional[str] = None, **kwargs) -> Config:
         with open(config_file, 'r', encoding='utf-8') as f:
             if config_file.endswith('.json'):
                 file_config = json.load(f)
-            elif config_file.endswith(('.yaml', '.yml')):
+            elif config_file.endswith( ('.yaml', '.yml')):
                 file_config = yaml.safe_load(f)
             else:
                 raise ValueError(f"不支持的配置文件格式: {config_file}")
         
-        # 合并配置 (简化版本，实际可能需要更复杂的合并逻辑)
+        # 合并配置
         for section_name, section_values in file_config.items():
-            if hasattr(config, section_name):
+            if hasattr(config, section_name) and isinstance(section_values, dict):
                 section_obj = getattr(config, section_name)
-                # 如果 section_values 是一个字典 (如 data: {...}, model: {...})
-                # 那么 section_values.items() 是有效的
-                # 但如果 section_name 是 'seed' 且 section_values 是 42 (一个整数)
-                # 那么 42.items() 就会导致 AttributeError
                 for key, value in section_values.items():
                     if hasattr(section_obj, key):
                         setattr(section_obj, key, value)
                         file_values_loaded[key] = value # 记录从文件加载的值
-            elif section_name in ['n_trials', 'seed']: # 特殊处理直接在Config根上的属性
+            elif section_name in ['n_trials', 'seed', 'num_workers']: # 处理直接在Config根上的属性
                  if hasattr(config, section_name):
                     setattr(config, section_name, section_values)
-                    file_values_loaded[section_name] = section_values
+                    file_values_loaded[section_name] = section_values # 包括 num_workers
             else:
                 # 对于配置文件中存在，但Config类中完全没有对应属性或节的键，可以选择忽略或警告
-                # 例如，如果配置文件中有 'unknown_param: value'，而Config中没有 'unknown_param'
-                # 当前逻辑会将其忽略。可以添加一个 logger.warning
-                pass # 或者 logger.warning(f"配置文件中的键 '{section_name}' 在Config对象中未定义，已忽略。")
+                pass
 
     # 应用命令行参数覆盖
     for key, value_from_cmd in kwargs.items():
         if value_from_cmd is not None:
-            # 检查命令行参数是否是其默认值。如果是，并且文件中有值，则不覆盖。
             is_default_argparse_value = (key in argparse_defaults and value_from_cmd == argparse_defaults[key])
             
-            # 目标配置段和键
             target_section_obj = None
             target_key_in_section = key
 
-            if key in ['max_users', 'data_version', 'feature_dim', 'num_cores', 'sample_ratio', 'sequence_length']:
+            if key in ['max_users', 'data_version', 'feature_dim', 'sample_ratio', 'sequence_length']: # num_cores is already in data section
                 target_section_obj = config.data
             elif key in ['epochs', 'batch_size', 'learning_rate', 'device', 'test_split', 'val_split']:
                 target_section_obj = config.training
@@ -224,22 +216,74 @@ def load_config(config_file: Optional[str] = None, **kwargs) -> Config:
                          'lgbm_num_leaves', 'lgbm_max_depth', 'lgbm_learning_rate', 'lgbm_feature_fraction',
                          'fusion_type', 'num_classes', 'head_dropout']:
                 target_section_obj = config.model
-            elif key in ['n_trials', 'seed']: # 直接在Config根上的属性
-                target_section_obj = config # 指向根Config对象
+            elif key in ['n_trials', 'seed', 'num_workers']: # 直接在Config根上的属性，包括 num_workers
+                target_section_obj = config
             else:
-                # 对于不在已知配置段的参数，尝试直接设置到根配置对象
-                # 但只有当它不是argparse的默认值，或者文件没有提供值时才这样做
                 if hasattr(config, key):
                     if not (is_default_argparse_value and key in file_values_loaded):
                         setattr(config, key, value_from_cmd)
-                continue # 跳过后续的 section_obj 逻辑
+                continue
 
             if target_section_obj is not None and hasattr(target_section_obj, target_key_in_section):
-                if not (is_default_argparse_value and key in file_values_loaded):
+                # 如果命令行参数是默认值 且 文件中已加载该值，则不覆盖
+                if not (is_default_argparse_value and target_key_in_section in file_values_loaded):
                     setattr(target_section_obj, target_key_in_section, value_from_cmd)
-            elif hasattr(config, key): # 如果在Config的根级别定义（如n_trials, seed）
+            elif hasattr(config, key): # 再次检查根级别，以防上面未匹配但根级别存在
                 if not (is_default_argparse_value and key in file_values_loaded):
                      setattr(config, key, value_from_cmd)
+    
+    # data.num_cores 的特殊处理：确保命令行 --num_cores 优先于文件中的 data.num_cores
+    # 并确保 config.num_cores (用于DataLoader) 与 config.data.num_cores (用于数据流水线) 可以独立设置或同步
+    # 当前的命令行 --num_cores 会通过上面的逻辑直接设置到 config.num_workers (如果 Config 类有 num_workers 属性)
+    # 或 config.num_cores (如果 Config 类有 num_cores 属性且它被映射到那里)。
+
+    # 当前逻辑会将 --num_cores (命令行) 设置到 config.num_cores (根级别)
+    # 如果YAML中 data: num_cores: X 存在, 它会设置到 config.data.num_cores
+    # 如果YAML中 num_workers: Y 存在, 它会设置到 config.num_workers (根级别)
+    
+    # 确保 config.data.num_cores 可以被命令行 --num_cores 覆盖，如果用户期望这种行为
+    # 鉴于 `--num_cores` 的帮助文本是 "CPU核心数"，它可能同时指代数据处理和数据加载
+    # 这里我们假设命令行的 --num_cores 主要目标是 config.num_cores (或我们将其视为 config.num_workers)
+    # 而文件中的 data.num_cores 控制数据预处理的核心数。
+
+    # 如果您希望命令行的 --num_cores 同时覆盖 config.num_workers 和 config.data.num_cores:
+    # if 'num_cores' in kwargs and kwargs['num_cores'] is not None:
+    #     num_cores_cmd_val = kwargs['num_cores']
+    #     is_default_nc = ('num_cores' in argparse_defaults and num_cores_cmd_val == argparse_defaults['num_cores'])
+    #     if not (is_default_nc and 'num_cores' in file_values_loaded): # 检查根 num_cores
+    #         config.num_workers = num_cores_cmd_val # 假设 config.num_workers 是DataLoader用的
+    #     if not (is_default_nc and 'num_cores' in file_values_loaded.get('data', {})):
+    #         config.data.num_cores = num_cores_cmd_val # 数据预处理用的
+
+    # 确保 config.num_workers (DataLoader用的) 和 config.data.num_cores (Pipeline用的) 被正确设置
+    # 命令行 --num_cores 应该更新 config.num_workers (假设Config类中有此属性 for DataLoader)
+    # YAML 中根级别的 num_workers 更新 config.num_workers
+    # YAML 中 data.num_cores 更新 config.data.num_cores
+
+    # 整理：
+    # 1. YAML 根 num_workers -> config.num_workers (已由上面代码处理)
+    # 2. YAML data.num_cores -> config.data.num_cores (已由上面代码处理)
+    # 3. 命令行 --num_cores -> config.num_workers (如果 Config 顶级属性是 num_workers)
+    #                         或 config.num_cores (如果 Config 顶级属性是 num_cores)
+    # 假设我们希望 `--num_cores` 更新用于 DataLoader 的 worker 数量，即 `config.num_workers`。
+    # 而 `config.data.num_cores` 用于数据流水线中的并行处理。
+
+    # 如果 Config 类直接有 num_workers 属性 (推荐用于 DataLoader)
+    if 'num_cores' in kwargs and hasattr(config, 'num_workers'):
+        cmd_val = kwargs['num_cores']
+        if cmd_val is not None:
+            is_default_argparse_val_for_nc = ('num_cores' in argparse_defaults and cmd_val == argparse_defaults['num_cores'])
+            if not (is_default_argparse_val_for_nc and 'num_workers' in file_values_loaded): # 比较时用 num_workers 因为这是目标
+                config.num_workers = cmd_val
+    
+    # 如果 Config 类直接有 num_cores 属性 (作为 DataLoader worker 数的旧方式或通用CPU数)
+    # 并且也希望命令行 --num_cores 更新它 (覆盖文件中的根级别 num_cores)
+    elif 'num_cores' in kwargs and hasattr(config, 'num_cores'):
+        cmd_val = kwargs['num_cores']
+        if cmd_val is not None:
+            is_default_argparse_val_for_nc = ('num_cores' in argparse_defaults and cmd_val == argparse_defaults['num_cores'])
+            if not (is_default_argparse_val_for_nc and 'num_cores' in file_values_loaded): # 比较时用 num_cores
+                config.num_cores = cmd_val
 
     return config
 

@@ -21,3 +21,4 @@ DayLevelFeatures/
 WeekLevelFeatures/
 experiments/wandb/  
 experiments/results/
+cur_results/
