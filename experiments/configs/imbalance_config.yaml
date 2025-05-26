@@ -13,7 +13,7 @@ training:
 
 data:
   max_users: 500
-  max_weeks: 36
+  max_weeks: 16
   sample_ratio: 1.0
 
 # 不平衡实验特定配置

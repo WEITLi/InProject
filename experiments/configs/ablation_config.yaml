@@ -4,9 +4,9 @@
 data:
   data_version: "r4.2"
   max_users: 500
-  max_weeks: 36
+  max_weeks: 16
   feature_dim: 256
-  num_cores: 8
+  num_cores: 12
   sample_ratio: 1.0
   force_regenerate_combined_weeks: false
   force_regenerate_analysis_levels: false
