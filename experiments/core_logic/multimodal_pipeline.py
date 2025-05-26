@@ -594,117 +594,172 @@ class MultiModalDataPipeline:
         return labels
     
     def _integrate_multimodal_data(self, 
-                                 user_graph_data: Dict[str, Any],
+                                 user_graph_data: Dict[str, Any],\
                                  text_data: Dict[str, Any], # 文本数据仍是全局加载的
                                  behavior_sequences: Dict[str, Any], # 已按final_user_list筛选
                                  structured_features: Dict[str, Any], # 已按final_user_list筛选
                                  labels_data: Dict[str, int], # 已按final_user_list筛选
                                  sequence_length: int,
                                  final_user_list: List[str]) -> Dict[str, Any]: # 权威用户列表
-        """整合多模态数据，确保基于final_user_list"""
-        logger = logging.getLogger(__name__) # <--- 添加这一行
+        """整合多模态数据，确保基于final_user_list和enabled_modalities"""
+        logger = logging.getLogger(__name__) 
         
-        print(f"   整合多模态数据 (基于 {len(final_user_list)} 个权威用户)...")
-        # 获取用户列表 - 现在直接使用 final_user_list
-        # users = list(labels_data.keys()) # 旧方法，现在用final_user_list
+        print(f"   整合多模态数据 (基于 {len(final_user_list)} 个权威用户 and enabled_modalities: {self.config.model.enabled_modalities})...")
         users = final_user_list
-        
-        # 确保 user_graph_data['user_to_index'] 只包含 final_user_list 中的用户
-        # 如果图是为这些精确用户构建的，那应该是匹配的。
-        # 但为了安全，我们基于 final_user_list 和图中实际存在的用户来调整
-        
-        graph_node_features = user_graph_data.get('node_features')
-        graph_adj_matrix = user_graph_data.get('adjacency_matrix')
-        graph_user_to_index = user_graph_data.get('user_to_index', {})
+        enabled_modalities = self.config.model.enabled_modalities
 
-        # 如果图数据是为超集用户构建的，需要根据final_user_list进行子图提取
-        # 但我们修改了_load_user_graph_data使其基于users_df_for_graph构建，
-        # 所以这里的 graph_user_to_index 应该已经对应 final_user_list
-        # 因此，我们信任传递过来的 graph_user_to_index
-        
-        # 准备各模态数据
-        behavior_seq_data = []
-        text_content_data = []
-        structured_feat_data = []
-        labels = []
-        user_indices_in_graph_list = [] # 新增：用于收集每个用户的图索引
-        
-        for user in users:
-            # 1. 行为序列数据
-            if user in behavior_sequences:
-                user_sequences = behavior_sequences[user]
-                if len(user_sequences) > 0:
-                    # 取最后一个序列或合并多个序列
-                    if len(user_sequences) == 1:
-                        seq = user_sequences[0]
-                    else:
-                        # 合并多个序列
-                        seq = np.concatenate(user_sequences, axis=0)
-                    
-                    # 截断或填充到指定长度
-                    if len(seq) > sequence_length:
-                        seq = seq[-sequence_length:]
-                    elif len(seq) < sequence_length:
-                        padding = np.zeros((sequence_length - len(seq), seq.shape[1]))
-                        seq = np.concatenate([padding, seq], axis=0)
-                    
-                    behavior_seq_data.append(seq)
-                else:
-                    behavior_seq_data.append(np.zeros((sequence_length, self.feature_dim)))
-            else:
-                behavior_seq_data.append(np.zeros((sequence_length, self.feature_dim)))
-            
-            # 2. 文本内容数据
-            user_texts = []
-            for week_data in text_data.values():
-                if user in week_data.get('email_texts', {}):
-                    user_texts.extend(week_data['email_texts'][user])
-                if user in week_data.get('file_texts', {}):
-                    user_texts.extend(week_data['file_texts'][user])
-                if user in week_data.get('http_texts', {}):
-                    user_texts.extend(week_data['http_texts'][user])
-            
-            # 合并文本内容
-            combined_text = " ".join(user_texts[:10])  # 限制文本长度
-            if not combined_text.strip():
-                combined_text = "No text content"
-            text_content_data.append(combined_text)
-            
-            # 3. 结构化特征数据
-            if user in structured_features:
-                user_features = structured_features[user]
-                if len(user_features) > 0:
-                    # 取平均值或最后一个特征向量
-                    avg_features = np.mean(user_features, axis=0)
-                    structured_feat_data.append(avg_features)
-                else:
-                    structured_feat_data.append(np.zeros(50))  # 默认特征维度
-            else:
-                structured_feat_data.append(np.zeros(50))
-            
-            # 4. 标签
-            labels.append(labels_data[user])
-
-            # 5. 用户在图中的索引 (新增)
-            if user in graph_user_to_index:
-                user_indices_in_graph_list.append(graph_user_to_index[user])
-            else:
-                # 如果用户不在图的映射中（理论上不应该发生，如果final_user_list是权威的且图是为这些用户构建的）
-                # 添加一个无效索引，例如 -1
-                user_indices_in_graph_list.append(-1) 
-                logger.warning(f"用户 {user} 未在 graph_user_to_index 中找到，图索引设为-1")
-        
-        return {
-            'behavior_sequences': np.array(behavior_seq_data),
-            'node_features': graph_node_features,
-            'adjacency_matrix': graph_adj_matrix,
-            'text_content': text_content_data,
-            'structured_features': np.array(structured_feat_data),
-            'labels': np.array(labels),
+        # 初始化返回的字典
+        integrated_data = {
+            'labels': np.array([labels_data[user] for user in users]),
             'users': users,
-            'user_to_index': graph_user_to_index,
-            'user_indices_in_graph': np.array(user_indices_in_graph_list) # 新增：添加图索引列表
+            # 将 user_to_index 和 user_indices_in_graph 的初始化移到图模态处理部分
         }
+
+        # 准备各模态数据
+        # 行为序列数据
+        if 'behavior' in enabled_modalities:
+            behavior_seq_list = []
+            for user in users:
+                if user in behavior_sequences:
+                    user_seqs = behavior_sequences[user]
+                    if len(user_seqs) > 0:
+                        seq = np.concatenate(user_seqs, axis=0) if len(user_seqs) > 1 else user_seqs[0]
+                        if len(seq) > sequence_length:
+                            seq = seq[-sequence_length:]
+                        elif len(seq) < sequence_length:
+                            padding = np.zeros((sequence_length - len(seq), seq.shape[1] if seq.ndim > 1 and seq.shape[1] > 0 else self.feature_dim))
+                            seq = np.concatenate([padding, seq], axis=0)
+                        behavior_seq_list.append(seq)
+                    else:
+                        behavior_seq_list.append(np.zeros((sequence_length, self.feature_dim)))
+                else:
+                    behavior_seq_list.append(np.zeros((sequence_length, self.feature_dim)))
+            integrated_data['behavior_sequences'] = np.array(behavior_seq_list)
+        else:
+            integrated_data['behavior_sequences'] = np.array([]) # 或者 None, 或根本不加这个key
+
+        # 文本内容数据
+        if 'text' in enabled_modalities:
+            text_content_list = []
+            for user in users:
+                user_texts_collector = []
+                # 从 text_data (假设是全局加载的，包含了所有用户的文本) 中筛选当前用户的文本
+                # text_data 的结构可能是 {user1: {'email_texts': [...], ...}, user2: ...}
+                # 或者更复杂的结构，这里需要根据实际 text_data 结构调整
+                # 假设 text_data[user] 直接给出了该用户所有类型的文本列表或字典
+                if user in text_data: # 检查用户是否存在于全局文本数据中
+                    actual_user_text_data = text_data[user] # 假设这是该用户所有文本的字典
+                    if isinstance(actual_user_text_data, dict):
+                        if 'email_texts' in actual_user_text_data: user_texts_collector.extend(actual_user_text_data['email_texts'])
+                        if 'file_texts' in actual_user_text_data: user_texts_collector.extend(actual_user_text_data['file_texts'])
+                        if 'http_texts' in actual_user_text_data: user_texts_collector.extend(actual_user_text_data['http_texts'])
+                        if 'other_texts' in actual_user_text_data: user_texts_collector.extend(actual_user_text_data['other_texts'])
+                    elif isinstance(actual_user_text_data, list): # 如果text_data[user]直接是文本列表
+                        user_texts_collector.extend(actual_user_text_data)
+                
+                combined_text = " ".join(user_texts_collector[:100]) # 限制组合文本长度，例如取前100条
+                if not combined_text.strip():
+                    combined_text = "No text content available" # 提供一个明确的占位符
+                text_content_list.append(combined_text)
+            integrated_data['text_content'] = text_content_list
+        else:
+            integrated_data['text_content'] = [] # 或者 None
+
+        # 结构化特征数据
+        if 'structured' in enabled_modalities:
+            structured_feat_list = []
+            # 尝试获取一个样本的结构化特征维度，如果列表非空
+            default_struct_dim = 0
+            if structured_features:
+                first_user_with_struct = next((u for u in users if u in structured_features and len(structured_features[u]) > 0), None)
+                if first_user_with_struct and len(structured_features[first_user_with_struct][0]) > 0:
+                     default_struct_dim = structured_features[first_user_with_struct][0].shape[0]
+                elif self.config and hasattr(self.config.model, 'structure_feat_dim'): # Fallback to config if possible
+                    default_struct_dim = self.config.model.structure_feat_dim
+                else: # Final fallback
+                    default_struct_dim = 50 # 原来的默认值
+
+            for user in users:
+                if user in structured_features:
+                    user_feats = structured_features[user]
+                    if len(user_feats) > 0:
+                        avg_features = np.mean(user_feats, axis=0)
+                        structured_feat_list.append(avg_features)
+                    else:
+                        structured_feat_list.append(np.zeros(default_struct_dim))
+                else:
+                    structured_feat_list.append(np.zeros(default_struct_dim))
+            integrated_data['structured_features'] = np.array(structured_feat_list)
+        else:
+            integrated_data['structured_features'] = np.array([]) # 或者 None
+
+        # 图数据 (节点特征, 邻接矩阵, 用户到索引的映射)
+        # 图数据较为特殊，它的存在可能独立于其他模态是否启用，因为它可以被多种模态使用
+        # 但如果 'graph' 模态本身被视为一个独立的输入分支 (例如直接用GNN输出作为一路特征)，则也应受 enabled_modalities 控制
+        if 'graph' in enabled_modalities and user_graph_data:
+            # 假设 user_graph_data 已经基于 final_user_list 构建，所以 user_to_index 是对应的
+            integrated_data['node_features'] = user_graph_data.get('node_features', np.array([]))
+            integrated_data['adjacency_matrix'] = user_graph_data.get('adjacency_matrix', np.array([]))
+            # user_to_index 应该与 final_user_list 和图结构对齐
+            graph_user_to_index = user_graph_data.get('user_to_index', {})
+            integrated_data['user_to_index'] = graph_user_to_index
+            
+            user_indices_in_graph_list = []
+            for user in users: # users is final_user_list
+                if user in graph_user_to_index:
+                    user_indices_in_graph_list.append(graph_user_to_index[user])
+                else:
+                    user_indices_in_graph_list.append(-1) 
+                    logger.warning(f"用户 {user} 未在 graph_user_to_index (来自user_graph_data) 中找到，图索引设为-1")
+            integrated_data['user_indices_in_graph'] = np.array(user_indices_in_graph_list)
+        else:
+            # 如果图模态未启用，或者没有图数据，则提供空的或默认值
+            # 模型侧也需要能处理这些键不存在或为空的情况
+            integrated_data['node_features'] = np.array([])
+            integrated_data['adjacency_matrix'] = np.array([])
+            # 即使图模态未启用，user_to_index 可能对其他部分有用（如果基于 final_user_list 创建）
+            # 但如果模型不期望它，最好不包含。或者提供一个基于final_user_list的简单映射。
+            # 为了与上面graph_user_to_index的用法一致，这里如果graph未启用，则不主动填充user_to_index和user_indices_in_graph
+            integrated_data['user_to_index'] = {} 
+            integrated_data['user_indices_in_graph'] = np.array([])
+
+        # 清理：对于未启用的模态，确保其数据为空或键不存在，以避免下游使用。
+        # 上面的逻辑已经尝试做到这一点，但可以再加一层保险。
+        all_possible_modalities_keys = {
+            'behavior': 'behavior_sequences',
+            'text': 'text_content',
+            'structured': 'structured_features',
+            'graph': ['node_features', 'adjacency_matrix', 'user_to_index', 'user_indices_in_graph'] # 'graph'可以代表多个键
+        }
+
+        for mod_name, data_keys in all_possible_modalities_keys.items():
+            if mod_name not in enabled_modalities:
+                if isinstance(data_keys, list):
+                    for key in data_keys:
+                        if key in integrated_data: # 如果不希望下游看到这些键，可以 del integrated_data[key]
+                           if key in ['user_to_index']: # 特殊处理user_to_index，如果graph未启用，上面已设为{}
+                               integrated_data[key] = {}
+                           else:
+                               integrated_data[key] = np.array([]) if 'features' in key or 'matrix' in key or 'indices' in key else []
+                else: # data_keys is a single string
+                    if data_keys in integrated_data: # 同上
+                        integrated_data[data_keys] = np.array([]) if 'sequences' in data_keys or 'features' in data_keys else []
+        
+        # 确保基础键存在，即使为空，以防下游代码期望它们
+        # (上面的逻辑已经处理了，这里是再次确认)
+        for key_template in ['behavior_sequences', 'node_features', 'adjacency_matrix', 'text_content', 'structured_features', 'user_indices_in_graph']:
+            if key_template not in integrated_data:
+                if key_template == 'text_content':
+                    integrated_data[key_template] = []
+                elif key_template == 'user_to_index':
+                     integrated_data[key_template] = {}
+                else:
+                    integrated_data[key_template] = np.array([])
+        
+        if 'user_to_index' not in integrated_data: # 确保存在
+            integrated_data['user_to_index'] = {}
+
+        return integrated_data # 返回新的精确构建的字典
     
     def _construct_user_relationships(self, users_df: pd.DataFrame, # 现在这个users_df是已经筛选过的
                                     start_week: int, end_week: int) -> Dict[str, Any]:
