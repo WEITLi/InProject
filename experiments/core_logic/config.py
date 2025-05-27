@@ -67,6 +67,12 @@ class TrainingConfig:
     weight_decay: float = 1e-5       # 权重衰减
     device: str = "auto"             # 训练设备
     
+    def __post_init__(self):
+        """确保epochs和num_epochs保持同步"""
+        # 如果epochs和num_epochs不同，优先使用epochs的值
+        if self.epochs != self.num_epochs:
+            self.num_epochs = self.epochs
+    
     # 优化器配置
     optimizer: str = "adamw"         # 优化器类型
     scheduler: str = "cosine"        # 学习率调度器

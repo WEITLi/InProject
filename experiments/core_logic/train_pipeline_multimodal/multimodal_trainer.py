@@ -571,6 +571,20 @@ class MultiModalTrainer:
             logger.info(f"[Ablation Val] Validation Labels Counter: {Counter(all_labels)}")
             logger.info(f"[Ablation Val] Validation Predictions Counter: {Counter(all_predictions)}")
             logger.info(f"[Ablation Val] Validation F1 (weighted): {f1:.5f}, Accuracy: {accuracy:.5f}")
+            
+            # 🔧 添加更详细的调试信息
+            logger.info(f"[Ablation Val] Unique prediction values: {set(all_predictions)}")
+            logger.info(f"[Ablation Val] Probability distribution - Mean: {np.mean(all_probabilities):.4f}, Std: {np.std(all_probabilities):.4f}")
+            logger.info(f"[Ablation Val] Probability range: [{np.min(all_probabilities):.4f}, {np.max(all_probabilities):.4f}]")
+            
+            # 检查是否所有预测都相同
+            if len(set(all_predictions)) == 1:
+                logger.warning(f"[Ablation Val] ⚠️  所有预测都是相同的值: {all_predictions[0]}！这表明模型没有学到有用的模式。")
+            
+            # 检查概率分布是否过于集中
+            prob_std = np.std(all_probabilities)
+            if prob_std < 0.01:
+                logger.warning(f"[Ablation Val] ⚠️  概率分布过于集中 (std={prob_std:.6f})，可能表明模型输出缺乏多样性。")
 
         # 计算AUC（如果有正负样本）
         try:

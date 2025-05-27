@@ -204,33 +204,20 @@ class MultiModalDataPipeline:
     def _apply_max_users_filter(self, users_df: pd.DataFrame, max_users: Optional[int]) -> pd.DataFrame:
         """
         辅助函数：对用户DataFrame应用max_users限制。
-        优先保留恶意用户。
+        使用完全随机采样，符合实际异常检测场景（不预先知道恶意用户）。
         """
         if max_users and len(users_df) > max_users:
             print(f"   统一应用用户数量限制: {len(users_df)} -> {max_users}")
-            if 'malscene' in users_df.columns:
-                malicious_users_df = users_df[users_df['malscene'] > 0]
-                normal_users_df = users_df[users_df['malscene'] == 0]
-
-                if len(malicious_users_df) >= max_users:
-                    final_users_df = malicious_users_df.sample(n=max_users, random_state=self.config.seed) # 使用 self.config.seed
-                else:
-                    remaining_slots = max_users - len(malicious_users_df)
-                    if remaining_slots > 0 and not normal_users_df.empty:
-                        selected_normal_df = normal_users_df.sample(
-                            n=min(remaining_slots, len(normal_users_df)), random_state=self.config.seed # 使用 self.config.seed
-                        )
-                        final_users_df = pd.concat([malicious_users_df, selected_normal_df])
-                    else:
-                        final_users_df = malicious_users_df
-                
-                if final_users_df.empty and not users_df.empty:
-                     print("    ⚠️ 优先选择恶意用户后为空，但原始用户列表不为空。回退到随机采样。")
-                     final_users_df = users_df.sample(n=min(max_users, len(users_df)), random_state=self.config.seed) # 使用 self.config.seed
-
-            else: # 没有恶意场景信息，随机采样
-                print("    ⚠️ 'malscene' 列不存在于users_df，执行随机用户采样。")
-                final_users_df = users_df.sample(n=min(max_users, len(users_df)), random_state=self.config.seed) # 使用 self.config.seed
+            print(f"   使用随机采样（符合实际场景，不预先知道恶意用户）")
+            
+            # 完全随机采样，不区分恶意/正常用户
+            final_users_df = users_df.sample(n=min(max_users, len(users_df)), random_state=self.config.seed)
+            
+            # 可选：报告采样后的标签分布（仅用于监控，不影响采样过程）
+            if 'malscene' in final_users_df.columns:
+                malicious_count = (final_users_df['malscene'] > 0).sum()
+                normal_count = len(final_users_df) - malicious_count
+                print(f"   随机采样结果: 恶意用户={malicious_count}, 正常用户={normal_count}")
             
             print(f"   最终筛选用户数: {len(final_users_df)}")
             return final_users_df
@@ -297,6 +284,11 @@ class MultiModalDataPipeline:
         # 生成包含模态信息的缓存文件名后缀
         enabled_modalities_sorted = sorted(self.config.model.enabled_modalities if self.config.model.enabled_modalities else ['none'])
         modalities_suffix = "_mods_" + "-".join(enabled_modalities_sorted)
+        
+        # 添加调试信息
+        logger.info(f"[MultiModalDataPipeline.prepare_training_data] enabled_modalities: {self.config.model.enabled_modalities}")
+        logger.info(f"[MultiModalDataPipeline.prepare_training_data] enabled_modalities_sorted: {enabled_modalities_sorted}")
+        logger.info(f"[MultiModalDataPipeline.prepare_training_data] modalities_suffix: {modalities_suffix}")
 
         training_data_file = os.path.join(self.multimodal_dir, "TrainingData",
                                         f"training_data_w{start_week}_{end_week}_u{len(final_user_list)}{modalities_suffix}.pickle")

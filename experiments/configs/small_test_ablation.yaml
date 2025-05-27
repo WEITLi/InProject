@@ -4,13 +4,14 @@
 #   42
 data:
   data_version: "r4.2"
-  max_users: 100
+  max_users: 100  # 增加用户数量
   max_weeks: 4
   feature_dim: 256
   num_cores: 8
   sample_ratio: 1.0
   force_regenerate_combined_weeks: false
   force_regenerate_analysis_levels: false
+  force_regenerate_training_data: true
 
 model:
   hidden_dim: 64
@@ -21,13 +22,13 @@ model:
   # enabled_modalities 将在运行时动态设置
 
 training:
-  epochs: 2  # 消融实验使用较少的epoch以节省时间
-  batch_size: 16
+  epochs: 5  # 增加训练轮数
+  batch_size: 32  # 增加批次大小
   learning_rate: 0.001
   weight_decay: 0.0001
   device: "auto"
-  val_split: 0.15
-  test_split: 0.15
+  val_split: 0.2  # 调整验证集比例
+  test_split: 0.2  # 调整测试集比例
   early_stopping_patience: 8
   save_best_model: true
 

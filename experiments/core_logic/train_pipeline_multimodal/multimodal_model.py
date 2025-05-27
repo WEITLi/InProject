@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from typing import Dict, List, Optional, Tuple, Union
 import sys
 import os
+import logging
 
 # 添加模型路径
 try:
@@ -18,7 +19,8 @@ try:
     from ..models.base_model.head import ClassificationHead
     from ..models.text_encoder.bert_module import BERTTextEncoder
     from ..models.structure_encoder.lightgbm_branch import LightGBMBranch
-    from ..models.fusion.attention_fusion import AttentionFusion
+    # from ..models.fusion.attention_fusion import AttentionFusion # Comment out old fusion
+    from ..models.fusion.cross_attention_fusion import CrossAttentionFusion # Import new fusion
 except ImportError:
     # 如果相对导入失败，添加路径并使用绝对导入
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,7 +35,8 @@ except ImportError:
     from models.base_model.head import ClassificationHead
     from models.text_encoder.bert_module import BERTTextEncoder
     from models.structure_encoder.lightgbm_branch import LightGBMBranch
-    from models.fusion.attention_fusion import AttentionFusion
+    # from models.fusion.attention_fusion import AttentionFusion # Comment out old fusion
+    from models.fusion.cross_attention_fusion import CrossAttentionFusion # Import new fusion
 
 class MultiModalAnomalyDetector(nn.Module):
     """
@@ -108,44 +111,48 @@ class MultiModalAnomalyDetector(nn.Module):
         
         # 5. 多模态融合器
         # 动态构建 input_dims_for_fusion based on enabled_modalities and their actual output dimensions
-        self.fusion_input_dims = []
+        # self.fusion_input_dims = [] # Old list way
+        self.fusion_input_dims_dict = {} # New dict way for CrossAttentionFusion
+
         if 'behavior' in self.model_config.enabled_modalities:
-            self.fusion_input_dims.append(_actual_transformer_config['hidden_dim'])
+            # self.fusion_input_dims.append(_actual_transformer_config['hidden_dim'])
+            # self.fusion_input_dims_dict['behavior'] = self.behavior_encoder.output_dim # Use actual output_dim from encoder
+            self.fusion_input_dims_dict['behavior'] = _actual_transformer_config['hidden_dim'] # Transformer output_dim is its hidden_dim
         if 'graph' in self.model_config.enabled_modalities:
-            self.fusion_input_dims.append(_actual_gnn_config['output_dim'])
+            # self.fusion_input_dims.append(_actual_gnn_config['output_dim'])
+            self.fusion_input_dims_dict['graph'] = _actual_gnn_config['output_dim'] # GNN config already specifies output_dim aligned with hidden_dim
         if 'text' in self.model_config.enabled_modalities:
-            self.fusion_input_dims.append(_actual_bert_config['output_dim'])
+            # self.fusion_input_dims.append(_actual_bert_config['output_dim'])
+            self.fusion_input_dims_dict['text'] = _actual_bert_config['output_dim'] # BERT config specifies output_dim aligned with hidden_dim
         if 'structured' in self.model_config.enabled_modalities:
-            self.fusion_input_dims.append(_actual_lgbm_config['output_dim'])
+            # self.fusion_input_dims.append(_actual_lgbm_config['output_dim'])
+            self.fusion_input_dims_dict['structured'] = _actual_lgbm_config['output_dim'] # LGBM config specifies output_dim aligned with hidden_dim
         
         # 决定融合模块输出维度 (也是分类头输入维度)
-        if len(self.fusion_input_dims) == 1:
-            # 如果只有一个模态，分类头的输入维度就是这个模态的输出维度
-            effective_fusion_embed_dim = self.fusion_input_dims[0]
-        elif hasattr(self.model_config, 'fusion_hidden_dim'):
-            effective_fusion_embed_dim = self.model_config.fusion_hidden_dim
-        else:
-            effective_fusion_embed_dim = self.model_config.hidden_dim
+        # For CrossAttentionFusion, the output_dim is self.model_config.hidden_dim (or passed as embed_dim to it)
+        effective_fusion_embed_dim = self.model_config.hidden_dim
 
-        _actual_fusion_config = {
-            'input_dims': self.fusion_input_dims,
-            'embed_dim': effective_fusion_embed_dim, # 使用修正后的维度
+        # _actual_fusion_config = { # For old AttentionFusion
+        #     'input_dims': self.fusion_input_dims,
+        #     'embed_dim': effective_fusion_embed_dim,
+        #     'dropout': self.model_config.dropout,
+        #     'use_gating': True 
+        # }
+        
+        _actual_cross_fusion_config = {
+            'input_dims': self.fusion_input_dims_dict,
+            'embed_dim': self.model_config.hidden_dim, # This is the output dim of CrossAttentionFusion's MLP
+            'num_heads': getattr(self.model_config, 'fusion_num_heads', 4), # Default to 4 if not in config
             'dropout': self.model_config.dropout,
-            'use_gating': True # Or derive from self.model_config.fusion_type
+            'query_modality_name': getattr(self.model_config, 'fusion_query_modality', 'behavior') # Default
         }
-        
-        # --- DEBUG PRINTS ---
-        # print(f"[DEBUG MultiModalAnomalyDetector] _actual_fusion_config: {_actual_fusion_config}")
-        from ..models.fusion.attention_fusion import AttentionFusion # 确保导入最新的
-        # print(f"[DEBUG MultiModalAnomalyDetector] AttentionFusion class: {AttentionFusion}")
-        # print(f"[DEBUG MultiModalAnomalyDetector] AttentionFusion __init__ signature: {AttentionFusion.__init__.__text_signature__ if hasattr(AttentionFusion.__init__, '__text_signature__') else 'not available'}")
-        # --- END DEBUG PRINTS ---
-        
-        self.fusion_module = AttentionFusion(**_actual_fusion_config)
+
+        # self.fusion_module = AttentionFusion(**_actual_fusion_config) # Old
+        self.fusion_module = CrossAttentionFusion(**_actual_cross_fusion_config) # New
         
         # 6. 分类头
         _actual_head_config = {
-            'input_dim': effective_fusion_embed_dim, # Input to head is output of fusion / single modality
+            'input_dim': effective_fusion_embed_dim, # Input to head is output of fusion
             'num_classes': self.model_config.num_classes,
             'dropout': self.model_config.head_dropout 
         }
@@ -197,87 +204,115 @@ class MultiModalAnomalyDetector(nn.Module):
         batch_size = inputs['behavior_sequences'].shape[0]
         
         # 1. 各模态特征编码
-        modality_features = []
-        modality_names = []
+        # modality_features = [] # Old list
+        # modality_names = []    # Old list
+        encoded_features_dict = {} # New dict
         
         # print(f"[DEBUG MMA Detector] Initial enabled_modalities: {self.model_config.enabled_modalities}")
 
         # 行为序列特征
         if 'behavior_sequences' in inputs and 'behavior' in self.model_config.enabled_modalities:
             behavior_features = self.encode_behavior_sequences(inputs['behavior_sequences'])
-            modality_features.append(behavior_features)
-            modality_names.append('behavior')
-            # print(f"[DEBUG MMA Detector] Added 'behavior' features. Current modality_features length: {len(modality_features)}")
+            # modality_features.append(behavior_features)
+            # modality_names.append('behavior')
+            encoded_features_dict['behavior'] = behavior_features
+            # print(f"[DEBUG MMA Detector] Added 'behavior' features. Shape: {behavior_features.shape}")
             
         # 用户关系特征 (GNN)
-        if ('node_features' in inputs and 
+        if (
+            'node_features' in inputs and 
             'adjacency_matrix' in inputs and 
-            'batch_user_indices_in_graph' in inputs and 
-            'graph' in self.model_config.enabled_modalities): # 使用 self.model_config
-            
+            # 'batch_user_indices_in_graph' in inputs and # GNN in this model takes full graph, then selects
+            'graph' in self.model_config.enabled_modalities
+        ): 
+            # GNN processing needs to result in per-batch-item features
+            # The current GNN (UserGNN) outputs features for ALL nodes in the graph.
+            # We need to select the features for the users in the current batch.
             user_features_global = self.user_encoder(
                 inputs['node_features'], 
                 inputs['adjacency_matrix']
             ) # Shape: [num_total_graph_users, gnn_output_dim]
 
-            batch_indices = inputs['batch_user_indices_in_graph']
-            valid_mask = batch_indices >= 0
-            
-            # Initialize batch GNN features with zeros
-            # Ensure self.user_encoder has output_dim attribute or get it from config
-            gnn_output_dim = self.user_encoder.output_dim if hasattr(self.user_encoder, 'output_dim') else self.config.model.hidden_dim # Fallback
-            user_features_for_batch = torch.zeros(batch_size, gnn_output_dim, device=user_features_global.device)
+            if 'batch_user_indices_in_graph' in inputs: # This key is crucial for selecting batch-specific GNN features
+                batch_indices = inputs['batch_user_indices_in_graph'] # [B]
+                valid_mask = batch_indices >= 0
+                
+                gnn_output_dim = self.user_encoder.output_dim if hasattr(self.user_encoder, 'output_dim') else self.model_config.hidden_dim
+                user_features_for_batch = torch.zeros(batch_size, gnn_output_dim, device=user_features_global.device)
 
-            if torch.any(valid_mask):
-                valid_batch_indices_in_graph = batch_indices[valid_mask]
-                # Ensure indices are within bounds for user_features_global
-                if valid_batch_indices_in_graph.max() < user_features_global.shape[0]:
-                    selected_gnn_features = user_features_global[valid_batch_indices_in_graph]
-                    # Place selected features into the correct batch positions
-                    user_features_for_batch[valid_mask] = selected_gnn_features
-                else:
-                    # This case should ideally not happen if data pipeline and indexing are correct
-                    # Or, log a warning
-                    pass # Or log: print("Warning: GNN batch_user_indices_in_graph out of bounds")
-            
-            modality_features.append(user_features_for_batch)
-            modality_names.append('graph')
-            # print(f"[DEBUG MMA Detector] Added 'graph' features. Current modality_features length: {len(modality_features)}")
+                if torch.any(valid_mask):
+                    valid_batch_indices_in_graph = batch_indices[valid_mask]
+                    if valid_batch_indices_in_graph.max() < user_features_global.shape[0]:
+                        selected_gnn_features = user_features_global[valid_batch_indices_in_graph]
+                        user_features_for_batch[valid_mask] = selected_gnn_features
+                    else:
+                        # Log warning about out-of-bounds indices
+                        pass 
+                
+                # modality_features.append(user_features_for_batch)
+                # modality_names.append('graph')
+                encoded_features_dict['graph'] = user_features_for_batch
+                # print(f"[DEBUG MMA Detector] Added 'graph' features. Shape: {user_features_for_batch.shape}")
+            else:
+                # print("[DEBUG MMA Detector] 'batch_user_indices_in_graph' missing, cannot extract GNN features for batch.")
+                # Fallback: add zeros or handle error, for now, 'graph' won't be in encoded_features_dict
+                pass # Or add zeros: encoded_features_dict['graph'] = torch.zeros(...)
+
             
         # 文本内容特征
-        if 'text_content' in inputs and 'text' in self.model_config.enabled_modalities: # 使用 self.model_config
+        if 'text_content' in inputs and 'text' in self.model_config.enabled_modalities:
             text_features = self.text_encoder(inputs['text_content'])
-            modality_features.append(text_features)
-            modality_names.append('text')
-            # print(f"[DEBUG MMA Detector] Added 'text' features. Current modality_features length: {len(modality_features)}")
+            # modality_features.append(text_features)
+            # modality_names.append('text')
+            encoded_features_dict['text'] = text_features
+            # print(f"[DEBUG MMA Detector] Added 'text' features. Shape: {text_features.shape}")
             
         # 结构化特征
-        if 'structured_features' in inputs and 'structured' in self.model_config.enabled_modalities: # 使用 self.model_config
+        if 'structured_features' in inputs and 'structured' in self.model_config.enabled_modalities:
             struct_features = self.encode_structured_features(inputs['structured_features'])
-            modality_features.append(struct_features)
-            modality_names.append('structured')
-            # print(f"[DEBUG MMA Detector] Added 'structured' features. Current modality_features length: {len(modality_features)}")
+            # modality_features.append(struct_features)
+            # modality_names.append('structured')
+            encoded_features_dict['structured'] = struct_features
+            # print(f"[DEBUG MMA Detector] Added 'structured' features. Shape: {struct_features.shape}")
         
-        # print(f"[DEBUG MMA Detector] Final modality_features length: {len(modality_features)}")
-        if not modality_features:
-            # print("[DEBUG MMA Detector] ERROR: modality_features list is empty!")
-            # Potentially raise an error or return dummy data to avoid further crashes
-            # This should not happen if config and inputs are correct
-            # For now, let it proceed to see where it crashes, but this is a critical check.
-            pass # 添加一个 pass 语句以保持块的有效性
+        if not encoded_features_dict:
+            # This means no modalities were enabled or no input provided for them.
+            # Handle this gracefully: return zero logits/probabilities for the batch.
+            # print("[DEBUG MMA Detector] Encoded features dictionary is empty!")
+            dummy_logits = torch.zeros(batch_size, self.model_config.num_classes, device=inputs['behavior_sequences'].device if 'behavior_sequences' in inputs and inputs['behavior_sequences'].numel() > 0 else 'cpu')
+            dummy_probs = F.softmax(dummy_logits, dim=1)
+            return {
+                'logits': dummy_logits,
+                'probabilities': dummy_probs,
+                'anomaly_scores': dummy_probs[:, 1] if self.model_config.num_classes > 1 else dummy_probs[:, 0],
+                'confidence': torch.max(dummy_probs, dim=1)[0],
+                'fused_features': torch.zeros(batch_size, self.model_config.hidden_dim, device=dummy_logits.device),
+                'modality_features': {}
+            }
 
         # 2. 多模态融合
-        if len(modality_features) > 1:
-            fusion_outputs = self.fusion_module(modality_features)
-            fused_features = fusion_outputs['fused_features']
-        else:
-            # 如果只有一个模态，直接使用该模态特征
-            fused_features = modality_features[0]
-            fusion_outputs = {
-                'fused_features': fused_features,
-                'attention_weights': None,
-                'gate_weights': None
-            }
+        # if len(modality_features) > 1: # Old logic
+        #     fusion_outputs = self.fusion_module(modality_features)
+        # elif modality_features: # Old logic: only one modality
+        #     fused_features = modality_features[0]
+        #     fusion_outputs = { ... } # Mocked output
+        # else: # No features, should be caught by the check above
+            # pass
+
+        # 🔧 添加调试信息（仅在消融实验中）
+        if len(self.model_config.enabled_modalities) <= 2:  # 消融实验通常是单模态或双模态
+            logger = logging.getLogger(__name__)
+            logger.debug(f"[MMA Forward] Enabled modalities: {self.model_config.enabled_modalities}")
+            logger.debug(f"[MMA Forward] Actually encoded modalities: {list(encoded_features_dict.keys())}")
+            for name, feat in encoded_features_dict.items():
+                logger.debug(f"[MMA Forward] {name} features shape: {feat.shape}, mean: {feat.mean().item():.4f}, std: {feat.std().item():.4f}")
+
+        fusion_outputs = self.fusion_module(encoded_features_dict) # Pass dictionary
+        fused_features = fusion_outputs['fused_features']
+        
+        # 🔧 添加融合后特征的调试信息
+        if len(self.model_config.enabled_modalities) <= 2:
+            logger.debug(f"[MMA Forward] Fused features shape: {fused_features.shape}, mean: {fused_features.mean().item():.4f}, std: {fused_features.std().item():.4f}")
         
         # 3. 异常检测分类
         logits = self.classification_head(fused_features)
@@ -305,16 +340,17 @@ class MultiModalAnomalyDetector(nn.Module):
             'anomaly_scores': anomaly_scores,
             'confidence': confidence,
             'fused_features': fused_features,
-            'modality_features': {
-                name: feat for name, feat in zip(modality_names, modality_features)
-            }
+            'modality_features': fusion_outputs.get('modality_features_projected', {}) # Get projected features from fusion output
+            # outputs['modality_features'] = { # Old way
+            #     name: feat for name, feat in zip(modality_names, modality_features)
+            # }
         }
         
-        # 添加融合权重信息
-        if fusion_outputs.get('attention_weights') is not None:
-            outputs['attention_weights'] = fusion_outputs['attention_weights']
-        if fusion_outputs.get('gate_weights') is not None:
-            outputs['gate_weights'] = fusion_outputs['gate_weights']
+        # 添加融合权重信息 (CrossAttentionFusion might not return these in the same way)
+        # if fusion_outputs.get('attention_weights') is not None:
+        #     outputs['attention_weights'] = fusion_outputs['attention_weights']
+        # if fusion_outputs.get('gate_weights') is not None:
+        #     outputs['gate_weights'] = fusion_outputs['gate_weights']
             
         return outputs
     

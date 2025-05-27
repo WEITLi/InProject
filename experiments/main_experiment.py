@@ -215,6 +215,9 @@ def load_config(config_file: Optional[str] = None, **kwargs) -> Config:
                     if hasattr(section_obj, key):
                         setattr(section_obj, key, value)
                         file_values_loaded[key] = value # 记录从文件加载的值
+                # 特殊处理：如果是training配置且设置了epochs，同步num_epochs
+                if section_name == 'training' and hasattr(section_obj, '__post_init__'):
+                    section_obj.__post_init__()
             elif section_name in ['n_trials', 'seed', 'num_workers']: # 处理直接在Config根上的属性
                  if hasattr(config, section_name):
                     setattr(config, section_name, section_values)
@@ -253,6 +256,9 @@ def load_config(config_file: Optional[str] = None, **kwargs) -> Config:
                 # 如果命令行参数是默认值 且 文件中已加载该值，则不覆盖
                 if not (is_default_argparse_value and target_key_in_section in file_values_loaded):
                     setattr(target_section_obj, target_key_in_section, value_from_cmd)
+                    # 特殊处理：如果设置了epochs，同步num_epochs
+                    if target_key_in_section == 'epochs' and hasattr(target_section_obj, '__post_init__'):
+                        target_section_obj.__post_init__()
             elif hasattr(config, key): # 再次检查根级别，以防上面未匹配但根级别存在
                 if not (is_default_argparse_value and key in file_values_loaded):
                      setattr(config, key, value_from_cmd)
