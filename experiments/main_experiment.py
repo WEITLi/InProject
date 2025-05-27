@@ -498,7 +498,7 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
         model_names_for_chart = list(comparison_summary.keys())
         f1_scores_for_chart = [comparison_summary[name]['f1_score'] for name in model_names_for_chart]
         
-        wandb_logger.log_ablation_results(model_names_for_chart, f1_scores_for_chart, title="Baseline Model F1 Comparison")
+        wandb_logger.log_ablation_results(model_names_for_chart, f1_scores_for_chart)
         # 可以添加更多图表，例如 AUC comparison_summary[name]['auc_score'] 等
         
         logger.info("✅ 基线对比实验完成")
