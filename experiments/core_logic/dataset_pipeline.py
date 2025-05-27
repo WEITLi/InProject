@@ -617,14 +617,12 @@ class CERTDatasetPipeline:
                 # 优化写入性能的参数
                 compression='snappy',  # 使用snappy压缩，平衡压缩率和速度
                 write_metadata_file=True,  # 写入元数据文件
-                # PyArrow特定优化
-                pyarrow_write_kwargs={
-                    'row_group_size': 100000,  # 增大行组大小
-                    'data_page_size': 1024*1024,  # 1MB数据页
-                    'compression_level': 1,  # 低压缩级别，优先速度
-                    'use_dictionary': True,  # 使用字典编码
-                    'write_batch_size': 10000,  # 批写入大小
-                }
+                # PyArrow特定优化 - 直接传递参数
+                row_group_size=100000,  # 增大行组大小
+                data_page_size=1024*1024,  # 1MB数据页
+                compression_level=1,  # 低压缩级别，优先速度
+                use_dictionary=True,  # 使用字典编码
+                write_batch_size=10000  # 批写入大小
             )
             print(f"   ✅ Dask DataFrame成功保存到Parquet目录: {parquet_output_dir}")
             self._monitor_memory_usage("Parquet保存完成")
