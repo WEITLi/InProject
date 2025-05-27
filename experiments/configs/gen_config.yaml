@@ -21,8 +21,8 @@ model:
   enabled_modalities: ["behavior", "graph", "text", "structured"] # 选择希望评估的模态组合
 
 training:
-  epochs: 3 # 示例轮数
-  batch_size: 32
+  epochs: 5 # 示例轮数
+  batch_size: 64
   learning_rate: 0.001
   device: "auto"
   val_split: 0.2
