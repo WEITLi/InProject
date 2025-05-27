@@ -19,7 +19,36 @@ from joblib import Parallel, delayed
 import dask.dataframe as dd
 import shutil # Added for rmtree
 from dask.distributed import Client, LocalCluster
+import dask
 warnings.filterwarnings('ignore')
+
+# 优化Dask全局配置
+dask.config.set({
+    # 内存管理优化
+    'distributed.worker.memory.target': 0.95,  # 目标内存使用率95%
+    'distributed.worker.memory.spill': 0.85,   # 85%时开始溢出到磁盘
+    'distributed.worker.memory.pause': 0.90,   # 90%时暂停接收新任务
+    'distributed.worker.memory.terminate': 0.98,  # 98%时终止worker
+    
+    # I/O优化
+    'dataframe.query-planning': True,  # 启用查询计划优化
+    'dataframe.shuffle.method': 'tasks',  # 使用任务级shuffle
+    'array.chunk-size': '256MB',  # 增大chunk大小
+    
+    # 并行优化
+    'distributed.worker.daemon': False,
+    'distributed.worker.multiprocessing-method': 'spawn',  # 使用spawn方法
+    
+    # 网络优化
+    'distributed.comm.compression': 'lz4',  # 使用LZ4压缩
+    'distributed.comm.timeouts.connect': '60s',
+    'distributed.comm.timeouts.tcp': '60s',
+    
+    # 调度器优化
+    'distributed.scheduler.allowed-failures': 10,  # 允许更多失败重试
+    'distributed.scheduler.work-stealing': True,   # 启用工作窃取
+    'distributed.scheduler.work-stealing-interval': '100ms',
+})
 
 # 导入新的模块化系统
 try:
@@ -51,6 +80,32 @@ class CERTDatasetPipeline:
     3. 活动数据的数值化特征提取
     4. 多粒度特征的统计计算和CSV导出
     """
+    
+    @staticmethod
+    def _monitor_memory_usage(stage_name: str = ""):
+        """监控内存使用情况"""
+        import psutil
+        import gc
+        
+        # 强制垃圾回收
+        gc.collect()
+        
+        # 获取内存信息
+        memory = psutil.virtual_memory()
+        process = psutil.Process()
+        process_memory = process.memory_info()
+        
+        print(f"📊 内存监控 {stage_name}:")
+        print(f"   系统内存: {memory.used/1024**3:.1f}GB / {memory.total/1024**3:.1f}GB ({memory.percent:.1f}%)")
+        print(f"   可用内存: {memory.available/1024**3:.1f}GB")
+        print(f"   进程内存: {process_memory.rss/1024**3:.1f}GB (RSS), {process_memory.vms/1024**3:.1f}GB (VMS)")
+        
+        return {
+            'system_used_gb': memory.used/1024**3,
+            'system_available_gb': memory.available/1024**3,
+            'process_rss_gb': process_memory.rss/1024**3,
+            'system_percent': memory.percent
+        }
     
     def __init__(self, data_version: str = 'r4.2', feature_dim: int = 256, num_cores: int = 8,
                  source_dir_override: Optional[str] = None, 
@@ -252,15 +307,42 @@ class CERTDatasetPipeline:
             sample_ratio: 数据采样比例 (0-1)，用于快速测试
             force_regenerate: 是否强制重新生成周数据 Parquet 文件集
         """
-        # Original Dask initialization logic starts here
+        # 优化的Dask初始化配置
         try:
             client = Client(timeout="2s", processes=False) 
             print(f"🎛️  Connected to existing Dask client: {client}")
         except (OSError, TimeoutError):
-            print(" başlatılıyor Dask LocalCluster... (No existing Dask client found or connection timed out)")
-            cluster = LocalCluster(n_workers=self.num_cores, threads_per_worker=1, memory_limit='auto') 
+            print("🚀 启动优化的Dask LocalCluster...")
+            
+            # 获取系统内存信息
+            import psutil
+            total_memory_gb = psutil.virtual_memory().total / (1024**3)
+            available_memory_gb = psutil.virtual_memory().available / (1024**3)
+            
+            # 计算每个worker的内存限制 (使用80%的可用内存)
+            memory_per_worker_gb = (available_memory_gb * 0.8) / self.num_cores
+            memory_per_worker = f"{memory_per_worker_gb:.1f}GB"
+            
+            print(f"   💾 系统总内存: {total_memory_gb:.1f}GB, 可用内存: {available_memory_gb:.1f}GB")
+            print(f"   ⚙️  配置: {self.num_cores} workers, 每个worker {memory_per_worker}")
+            
+            # 优化的LocalCluster配置
+            cluster = LocalCluster(
+                n_workers=self.num_cores,
+                threads_per_worker=2,  # 增加线程数以提高并行度
+                memory_limit=memory_per_worker,  # 设置具体的内存限制
+                processes=True,  # 使用进程而非线程，避免GIL限制
+                dashboard_address=':8787',  # 固定dashboard端口
+                silence_logs=False,  # 保留日志以便调试
+                # 优化配置
+                worker_kwargs={
+                    'memory_target_fraction': 0.95,  # 目标内存使用率
+                    'memory_spill_fraction': 0.85,   # 开始溢出到磁盘的阈值
+                    'memory_pause_fraction': 0.90,   # 暂停接收新任务的阈值
+                }
+            )
             client = Client(cluster)
-            print(f"🎛️  New Dask LocalCluster started: {cluster}")
+            print(f"🎛️  New optimized Dask LocalCluster started: {cluster}")
         
         # This part should be outside the try-except for client/cluster initialization 
         # if 'client' is not guaranteed to be defined in all paths of the try-except.
@@ -280,6 +362,9 @@ class CERTDatasetPipeline:
         print(f"\n{'='*60}")
         print(f"Step 1: 按周合并原始数据 (Dask模式, 输出 Parquet) (周 {start_week} 到 {end_week-1})")
         print(f"{'='*60}")
+        
+        # 监控初始内存状态
+        self._monitor_memory_usage("开始Step1")
 
         # 使用 self.current_parquet_dir_name 作为目标目录
         parquet_output_dir = self._get_work_file_path(self.current_parquet_dir_name)
@@ -360,6 +445,7 @@ class CERTDatasetPipeline:
                 print(f"   在工作目录找到测试数据文件，将使用测试数据")
 
         print("📁 读取原始数据文件 (使用 Dask)...")
+        self._monitor_memory_usage("开始读取文件")
         dask_dfs = []
 
         for event_type, filename in raw_files.items():
@@ -381,7 +467,30 @@ class CERTDatasetPipeline:
                 # 对于非常大的文件，可以减小 blocksize，例如 "32MB"
                 # low_memory=False 类似 pandas, engine='c' 通常不需要显式指定给 dask
                 try:
-                    ddf = dd.read_csv(actual_file_path, low_memory=False, blocksize="64MB")
+                    # 获取文件大小来动态调整blocksize
+                    file_size_mb = os.path.getsize(actual_file_path) / (1024 * 1024)
+                    
+                    # 根据文件大小和worker数量动态调整blocksize
+                    if file_size_mb > 1000:  # 大于1GB的文件
+                        blocksize = f"{max(32, int(file_size_mb / (self.num_cores * 4)))}MB"
+                    elif file_size_mb > 100:  # 100MB-1GB的文件
+                        blocksize = f"{max(16, int(file_size_mb / (self.num_cores * 2)))}MB"
+                    else:  # 小文件
+                        blocksize = "16MB"
+                    
+                    print(f"     文件大小: {file_size_mb:.1f}MB, 使用blocksize: {blocksize}")
+                    
+                    ddf = dd.read_csv(
+                        actual_file_path, 
+                        low_memory=False, 
+                        blocksize=blocksize,
+                        # 优化CSV读取参数
+                        engine='c',  # 使用C引擎
+                        dtype_backend='numpy_nullable',  # 使用更高效的数据类型
+                        # 预分配更多内存给pandas
+                        chunksize=None  # 让Dask自动处理分块
+                    )
+                    
                     # 如果指定了 sample_ratio < 1.0, Dask也支持采样
                     if sample_ratio and sample_ratio < 1.0:
                         print(f"     Dask 采样模式: 读取 {sample_ratio*100:.1f}% 的数据")
@@ -404,14 +513,29 @@ class CERTDatasetPipeline:
             return
 
         print("🔗 使用 Dask 合并所有事件数据...")
+        self._monitor_memory_usage("文件读取完成，开始合并")
         combined_ddf = dd.concat(dask_dfs, ignore_index=True, interleave_partitions=True)
         
-        # Repartition to consolidate potentially many small partitions after sampling and concat
-        # This can make subsequent sort and set_index more efficient.
-        # Aim for partitions of a reasonable size, e.g., 64MB-128MB.
-        # The actual number of partitions will be data_size / partition_size.
-        print(f"⚙️ Repartitioning Dask DataFrame to optimal partition size (e.g., 128MB)...")
-        combined_ddf = combined_ddf.repartition(partition_size="128MB")
+        # 获取当前分区信息
+        current_partitions = combined_ddf.npartitions
+        print(f"   当前分区数: {current_partitions}")
+        
+        # 动态计算最优分区大小
+        # 目标：每个分区使用约200-500MB内存，确保充分利用worker内存
+        import psutil
+        available_memory_gb = psutil.virtual_memory().available / (1024**3)
+        target_partition_size_mb = min(500, max(200, int((available_memory_gb * 0.6 * 1024) / (self.num_cores * 2))))
+        target_partition_size = f"{target_partition_size_mb}MB"
+        
+        print(f"⚙️ 重新分区以优化内存使用...")
+        print(f"   目标分区大小: {target_partition_size} (基于可用内存 {available_memory_gb:.1f}GB)")
+        
+        # 如果分区数太多或太少，进行重新分区
+        if current_partitions > self.num_cores * 8 or current_partitions < self.num_cores:
+            combined_ddf = combined_ddf.repartition(partition_size=target_partition_size)
+            print(f"   重新分区完成: {combined_ddf.npartitions} 个分区")
+        else:
+            print(f"   分区数合理，跳过重新分区")
 
         print("⚙️ 使用 Dask 计算日期范围和周数...")
         # Dask需要 .compute() 来获取标量结果
@@ -443,14 +567,26 @@ class CERTDatasetPipeline:
             if 'week' not in combined_ddf.columns:
                 raise ValueError("The 'week' column is missing from combined_ddf and is required for partitioning.")
 
+            # 优化的Parquet写入配置
             combined_ddf.to_parquet(
                 parquet_output_dir,
                 partition_on=['week'],
-                engine='pyarrow', # or 'fastparquet' if preferred and installed
-                # schema='infer', # schema can be inferred, or explicitly provided for large datasets
-                write_index=False # We removed set_index('date'), so no index to write
+                engine='pyarrow',
+                write_index=False,
+                # 优化写入性能的参数
+                compression='snappy',  # 使用snappy压缩，平衡压缩率和速度
+                write_metadata_file=True,  # 写入元数据文件
+                # PyArrow特定优化
+                pyarrow_write_kwargs={
+                    'row_group_size': 100000,  # 增大行组大小
+                    'data_page_size': 1024*1024,  # 1MB数据页
+                    'compression_level': 1,  # 低压缩级别，优先速度
+                    'use_dictionary': True,  # 使用字典编码
+                    'write_batch_size': 10000,  # 批写入大小
+                }
             )
             print(f"   ✅ Dask DataFrame成功保存到Parquet目录: {parquet_output_dir}")
+            self._monitor_memory_usage("Parquet保存完成")
         except Exception as e:
             print(f"   ❌ 保存Dask DataFrame到Parquet失败: {e}")
             # Potentially re-raise or handle more gracefully if this is critical
@@ -459,6 +595,7 @@ class CERTDatasetPipeline:
         # The old loop for saving individual pickle files is now replaced by to_parquet
         
         print("✅ Step 1 (Dask模式, Parquet输出, 无全局排序) 完成")
+        self._monitor_memory_usage("Step1完成")
     
     def step2_load_user_data(self):
         """

@@ -1,0 +1,82 @@
+# Dask内存优化配置文件
+# 用于提高Step 1数据合并阶段的内存使用效率
+
+# 系统配置
+system:
+  # 使用系统可用内存的百分比 (0.8 = 80%)
+  memory_usage_fraction: 0.8
+  # 每个worker的线程数 (建议2-4)
+  threads_per_worker: 2
+  # 是否使用进程而非线程 (推荐True以避免GIL)
+  use_processes: true
+
+# 内存管理
+memory:
+  # 目标内存使用率 (0.95 = 95%)
+  target_fraction: 0.95
+  # 开始溢出到磁盘的阈值 (0.85 = 85%)
+  spill_fraction: 0.85
+  # 暂停接收新任务的阈值 (0.90 = 90%)
+  pause_fraction: 0.90
+  # 终止worker的阈值 (0.98 = 98%)
+  terminate_fraction: 0.98
+
+# 数据处理
+data_processing:
+  # 目标分区大小范围 (MB)
+  min_partition_size_mb: 200
+  max_partition_size_mb: 500
+  # 默认分区大小 (MB)
+  default_partition_size_mb: 256
+  # 大文件的blocksize计算因子
+  large_file_factor: 4
+  # 中等文件的blocksize计算因子
+  medium_file_factor: 2
+
+# I/O优化
+io:
+  # 压缩算法 (lz4, snappy, gzip)
+  compression: "lz4"
+  # 是否启用查询计划优化
+  query_planning: true
+  # Shuffle方法 (tasks, disk)
+  shuffle_method: "tasks"
+  # 数组chunk大小
+  array_chunk_size: "256MB"
+
+# Parquet写入优化
+parquet:
+  # 压缩算法 (snappy, gzip, lz4, brotli)
+  compression: "snappy"
+  # 压缩级别 (1-9, 1最快)
+  compression_level: 1
+  # 行组大小
+  row_group_size: 100000
+  # 数据页大小 (bytes)
+  data_page_size: 1048576  # 1MB
+  # 批写入大小
+  write_batch_size: 10000
+  # 是否使用字典编码
+  use_dictionary: true
+
+# 网络优化
+network:
+  # 连接超时 (秒)
+  connect_timeout: 60
+  # TCP超时 (秒)
+  tcp_timeout: 60
+  # 允许的失败次数
+  allowed_failures: 10
+  # 工作窃取间隔 (毫秒)
+  work_stealing_interval: 100
+
+# 调试和监控
+debug:
+  # 是否启用详细日志
+  verbose_logging: true
+  # 是否显示内存监控
+  show_memory_monitor: true
+  # 内存监控间隔 (秒)
+  memory_monitor_interval: 30
+  # 是否保存性能报告
+  save_performance_report: false 
