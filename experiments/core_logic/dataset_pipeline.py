@@ -609,20 +609,30 @@ class CERTDatasetPipeline:
                 raise ValueError("The 'week' column is missing from combined_ddf and is required for partitioning.")
 
             # 优化的Parquet写入配置
+            to_parquet_kwargs = {
+                'partition_on': ['week'],
+                'engine': 'pyarrow',
+                'write_index': False,
+                'compression': 'snappy',
+                'write_metadata_file': True,
+                'row_group_size': 100000,
+                'data_page_size': 1024*1024,
+                'use_dictionary': True,
+                'write_batch_size': 10000
+            }
+
+            # Snappy 不支持 compression_level
+            # if to_parquet_kwargs['compression'] != 'snappy':
+            #     to_parquet_kwargs['compression_level'] = 1 
+            #  上面的逻辑是错误的，应该是如果不是snappy才设置，或者更准确地说，只有某些编解码器支持它
+            #  为了安全起见，如果用snappy，就不设置compression_level
+
+            if to_parquet_kwargs.get('compression') != 'snappy':
+                to_parquet_kwargs['compression_level'] = 1 # 仅为非snappy编解码器设置（如果它们支持）
+
             combined_ddf.to_parquet(
                 parquet_output_dir,
-                partition_on=['week'],
-                engine='pyarrow',
-                write_index=False,
-                # 优化写入性能的参数
-                compression='snappy',  # 使用snappy压缩，平衡压缩率和速度
-                write_metadata_file=True,  # 写入元数据文件
-                # PyArrow特定优化 - 直接传递参数
-                row_group_size=100000,  # 增大行组大小
-                data_page_size=1024*1024,  # 1MB数据页
-                compression_level=1,  # 低压缩级别，优先速度
-                use_dictionary=True,  # 使用字典编码
-                write_batch_size=10000  # 批写入大小
+                **to_parquet_kwargs
             )
             print(f"   ✅ Dask DataFrame成功保存到Parquet目录: {parquet_output_dir}")
             self._monitor_memory_usage("Parquet保存完成")

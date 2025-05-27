@@ -10,7 +10,7 @@ data:
   feature_dim: 256
   num_cores: 12
   sample_ratio: 1.0
-  force_regenerate_combined_weeks: true
+  force_regenerate_combined_weeks: false
   force_regenerate_analysis_levels: false
 
 model:
