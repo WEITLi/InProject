@@ -254,10 +254,16 @@ class MultiModalDataPipeline:
             训练数据字典
         """
         logger = logging.getLogger(__name__) # 获取 logger 实例
-        logger.info(f"[MultiModalDataPipeline.prepare_training_data] 接收到的参数: start_week={start_week}, end_week={end_week}, max_users={max_users}, sequence_length={sequence_length}")
+        logger.info(f"[MultiModalDataPipeline.prepare_training_data] Received parameters: start_week={start_week}, end_week={end_week}, max_users={max_users}, sequence_length={sequence_length}")
 
         if end_week is None:
+            original_end_week_param = None # For logging
             end_week = self.base_pipeline.max_weeks
+            logger.info(f"[MultiModalDataPipeline.prepare_training_data] Parameter 'end_week' was None (received: {original_end_week_param}), effectively set to self.base_pipeline.max_weeks: {end_week}")
+        else:
+            logger.info(f"[MultiModalDataPipeline.prepare_training_data] Parameter 'end_week' was provided: {end_week}")
+            
+        logger.info(f"[MultiModalDataPipeline.prepare_training_data] Effective 'end_week' that will be used for loading data: {end_week}")
             
         print(f"\n{'='*60}")
         print(f"Step 3: 准备多模态训练数据 (统一用户筛选)")
@@ -674,14 +680,49 @@ class MultiModalDataPipeline:
             structured_feat_list = []
             # 尝试获取一个样本的结构化特征维度，如果列表非空
             default_struct_dim = 0
-            if structured_features:
+            if structured_features: # structured_features is a dict {user: list_of_arrays_or_lists}
                 first_user_with_struct = next((u for u in users if u in structured_features and len(structured_features[u]) > 0), None)
-                if first_user_with_struct and len(structured_features[first_user_with_struct][0]) > 0:
-                     default_struct_dim = structured_features[first_user_with_struct][0].shape[0]
-                elif self.config and hasattr(self.config.model, 'structure_feat_dim'): # Fallback to config if possible
+                
+                if first_user_with_struct:
+                    item_to_check = structured_features[first_user_with_struct][0]
+                    # Check if the item is a NumPy array and has a valid shape
+                    if isinstance(item_to_check, np.ndarray):
+                        if item_to_check.ndim > 0 and item_to_check.shape[0] > 0: # Ensure array is not empty and has at least one dimension
+                            default_struct_dim = item_to_check.shape[0]
+                        else:
+                            logger.info(
+                                f"User {first_user_with_struct}'s first structured feature item is an empty or scalar np.ndarray. "
+                                f"Shape: {item_to_check.shape}. Cannot determine dimension from it."
+                            )
+                    elif isinstance(item_to_check, list):
+                        logger.warning(
+                            f"User {first_user_with_struct}'s first structured feature item is a list, not np.ndarray. "
+                            f"Content (first 5 elements): {item_to_check[:5]}. "
+                            "This may indicate an issue with data loading (e.g., from pickle)."
+                        )
+                        # Cannot get shape from a list, default_struct_dim remains 0, will use fallback.
+                    else:
+                        logger.warning(
+                            f"User {first_user_with_struct}'s first structured feature item is of unexpected type: {type(item_to_check)}. "
+                            "Cannot determine dimension from it."
+                        )
+                
+                # Fallback logic if default_struct_dim is still 0 (e.g., no valid first_user_with_struct, or item was problematic)
+                if default_struct_dim == 0: 
+                    if self.config and hasattr(self.config.model, 'structure_feat_dim') and isinstance(self.config.model.structure_feat_dim, int) and self.config.model.structure_feat_dim > 0:
+                        default_struct_dim = self.config.model.structure_feat_dim
+                        logger.info(f"Using structure_feat_dim from config: {default_struct_dim} due to problematic auto-detection or no suitable sample.")
+                    else:
+                        default_struct_dim = 50 # Original default value
+                        logger.info(f"Using fallback default structure_feat_dim: {default_struct_dim} due to problematic auto-detection or no suitable sample.")
+            else: # No structured_features available at all (empty dict)
+                logger.warning("Structured features dictionary is empty or None.")
+                if self.config and hasattr(self.config.model, 'structure_feat_dim') and isinstance(self.config.model.structure_feat_dim, int) and self.config.model.structure_feat_dim > 0:
                     default_struct_dim = self.config.model.structure_feat_dim
-                else: # Final fallback
-                    default_struct_dim = 50 # 原来的默认值
+                    logger.info(f"Using structure_feat_dim from config as structured_features is unavailable.")
+                else:
+                    default_struct_dim = 50 # Original default value
+                    logger.info(f"Using fallback default structure_feat_dim as structured_features is unavailable.")
 
             for user in users:
                 if user in structured_features:
@@ -1111,7 +1152,7 @@ class MultiModalDataPipeline:
                     # 需要与模型定义匹配，或者模型能够处理可变长度的结构化特征
                     # 暂时我们不强制长度，由模型部分处理或报错
                     if feature_vector: # 只有提取到特征才添加
-                         structured_features_all_users[user_id_in_file].append(feature_vector)
+                         structured_features_all_users[user_id_in_file].append(np.array(feature_vector, dtype=np.float32))
             else:
                 # print(f"   ⚠️ 未找到周 {week} 的数值特征文件 (Parquet/Pickle): {feature_file_parquet} / {feature_file_pickle}")
                 # 即使文件不存在或读取失败，也继续处理下一周，而不是打印每条消息

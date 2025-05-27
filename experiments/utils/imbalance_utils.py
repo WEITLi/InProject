@@ -120,21 +120,117 @@ class ImbalanceHandler:
             提取的数据
         """
         extracted_data = {}
+        # It's good to know the original number of samples for context if possible
+        # num_original_samples = len(multimodal_data.get('labels', []))
+
+        # Identify keys that are per-sample and should be sliced
+        # Other keys (e.g., graph data, global mappings) might be copied directly
+        # This list might need adjustment based on the exact structure of multimodal_data
+        per_sample_keys = ['labels', 'users', 'behavior_sequences', 'text_content', 'structured_features', 'user_indices_in_graph']
         
-        for key, value in multimodal_data.items():
-            if key == 'labels':
-                extracted_data[key] = [multimodal_data[key][i] for i in indices]
-            elif key == 'users':
-                extracted_data[key] = [multimodal_data[key][i] for i in indices]
-            elif key == 'text_content':
-                extracted_data[key] = [multimodal_data[key][i] for i in indices]
-            elif isinstance(value, np.ndarray):
-                extracted_data[key] = value[indices]
-            elif isinstance(value, list):
-                extracted_data[key] = [value[i] for i in indices]
+        # Convert indices to list if it's a numpy array for easier handling in list comprehensions if needed,
+        # though numpy indexing is generally preferred for numpy arrays.
+        # However, the error is in a list comprehension `[value[i] for i in indices]`.
+        
+        # Check if indices are empty before trying to get max/min
+        max_idx = -1
+        min_idx = -1
+        num_indices_to_extract = len(indices)
+
+        if num_indices_to_extract > 0:
+            # Ensure indices are integers for safe use with np.max/min if they are float from somewhere
+            # For safety, convert to int if they are not already, though they should be.
+            if not np.issubdtype(indices.dtype, np.integer):
+                print(f"  [DEBUG ImbalanceUtils] Warning: 'indices' array is not of integer type (dtype: {indices.dtype}). Casting to int.")
+                indices = indices.astype(int)
+            max_idx = np.max(indices)
+            min_idx = np.min(indices)
+
+        for key, current_value in multimodal_data.items():
+            print(f"--- Debugging _extract_samples_by_indices for key: '{key}' ---")
+            data_len_str = "N/A"
+            actual_len_for_indexing = -1
+
+            if isinstance(current_value, list):
+                actual_len_for_indexing = len(current_value)
+                data_len_str = f"list with {actual_len_for_indexing} elements"
+            elif isinstance(current_value, np.ndarray):
+                actual_len_for_indexing = current_value.shape[0] if current_value.ndim > 0 else 0 # Handle 0-dim arrays
+                data_len_str = f"numpy array with shape {current_value.shape}"
             else:
-                extracted_data[key] = value
-        
+                data_len_str = f"type {type(current_value)}, not a list or ndarray with standard length"
+
+            print(f"  Data for key '{key}': {data_len_str}")
+            print(f"  Type of data for key '{key}': {type(current_value)}")
+            print(f"  Number of indices to extract: {num_indices_to_extract}")
+            print(f"  Min index in 'indices': {min_idx}")
+            print(f"  Max index in 'indices': {max_idx}")
+
+            # Check for potential out-of-bounds before attempting the operation
+            if actual_len_for_indexing != -1 and num_indices_to_extract > 0: # If length is known and indices exist
+                if max_idx >= actual_len_for_indexing:
+                    print(f"  [POTENTIAL IndexError IMMINENT] For key '{key}': Max index ({max_idx}) is >= actual length ({actual_len_for_indexing}).")
+                if min_idx < 0 and not (isinstance(current_value, np.ndarray) and current_value.ndim > 0 and -actual_len_for_indexing <= min_idx < 0 ): # Python list negative indexing
+                    print(f"  [POTENTIAL IndexError IMMINENT] For key '{key}': Min index ({min_idx}) is < 0 and invalid for list or standard numpy positive indexing.")
+
+
+            # This is where the error on line 130 (original) occurs.
+            # The original code might be a simple loop or a more complex if/else structure.
+            # Based on the traceback, it's likely a direct list comprehension.
+            # We need to decide if this key should be sliced or copied.
+            # A more robust way would be to define which keys are sliceable.
+            
+            # If current_value is a list, or a numpy array that we want to treat like a list for this slice
+            if key in per_sample_keys: # Slice only per-sample keys
+                if isinstance(current_value, list):
+                    print(f"  Attempting to slice key '{key}' (list) using list comprehension.")
+                    if actual_len_for_indexing == 0 and num_indices_to_extract > 0:
+                        print(f"  [Warning] Key '{key}' is an empty list, but indices are present. Filling with {num_indices_to_extract} None values.")
+                        extracted_data[key] = [None] * num_indices_to_extract # Or empty strings: [""] * num_indices_to_extract
+                    elif actual_len_for_indexing < num_indices_to_extract and max_idx >= actual_len_for_indexing:
+                        # This case is tricky: if indices refer beyond the list length. 
+                        # The POTENTIAL IndexError IMMINENT should have warned.
+                        # For safety, if max_idx is out of bounds, we might also fill with None or truncate.
+                        # However, the original error implies direct indexing was attempted.
+                        # Let's ensure that if max_idx is too large, we still try to build a list of Nones for robustness.
+                        # The most common cause of the error for lists is `max_idx >= actual_len_for_indexing` when `actual_len_for_indexing > 0`
+                        # or `actual_len_for_indexing == 0` as handled above.
+                        if max_idx >= actual_len_for_indexing: # Re-check for clarity for this specific path
+                             print(f"  [Warning] Key '{key}' (list) has length {actual_len_for_indexing} but max index is {max_idx}. Potential partial fill or error.")
+                             # A robust way is to fill with None for out-of-bounds, or filter indices.
+                             # For now, let's try the direct comprehension and rely on earlier debug prints.
+                             # If it errors, we need to ensure indices are always valid *before* this loop.
+                             # The debug log showed text_content was len 0, and indices were 0-49. So the [i] access will fail.
+                             # The `actual_len_for_indexing == 0` case above handles this correctly now.
+                             extracted_data[key] = [current_value[i] for i in indices] # This line would still error if not for the check above.
+                        else:
+                             extracted_data[key] = [current_value[i] for i in indices]
+                    else:
+                        extracted_data[key] = [current_value[i] for i in indices]
+                elif isinstance(current_value, np.ndarray):
+                    print(f"  Attempting to slice key '{key}' (numpy array) using numpy indexing.")
+                    # Ensure indices are suitable for numpy array (e.g., integer array or list of integers)
+                    try:
+                        extracted_data[key] = current_value[indices]
+                    except IndexError as e_numpy:
+                        print(f"  [NumPy IndexError] Failed to slice numpy array for key '{key}': {e_numpy}")
+                        print(f"     Indices were: {indices[:10]}... (dtype: {indices.dtype if hasattr(indices, 'dtype') else type(indices)})")
+                        print(f"     Array shape: {current_value.shape}")
+                        # Fallback or re-raise: for now, let it store an empty list or re-raise.
+                        # To match list comprehension behavior in case of error (though error would be before assignment)
+                        # we might need to handle this more gracefully or ensure indices are always valid.
+                        # For debugging, if it fails here, the prints above should have given a clue.
+                        extracted_data[key] = [] # Placeholder on error to avoid subsequent issues
+                        # raise # Re-raise if you want the process to stop
+                else:
+                    print(f"  Key '{key}' is in per_sample_keys but is not a list or ndarray. Type: {type(current_value)}. Copying as is.")
+                    extracted_data[key] = current_value # Fallback: copy as is
+            else:
+                # For keys not in per_sample_keys (e.g., 'user_to_index', 'node_features', 'adjacency_matrix')
+                print(f"  Key '{key}' is not in per_sample_keys. Copying directly.")
+                extracted_data[key] = current_value
+            
+            print(f"--- End Debugging for key: '{key}' ---")
         return extracted_data
     
     def apply_sampling_strategy(self, 

@@ -19,5 +19,5 @@ data:
   sample_ratio: 1.0
 
 # 不平衡实验特定配置
-imbalance_ratios: [1.0, 2.0, 3.0, 4.0, 5.0]  # 正常:恶意比例
+imbalance_ratios: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]  # 正常:恶意比例
 sampling_strategies: ["none", "smote", "adasyn", "random_undersample"] 

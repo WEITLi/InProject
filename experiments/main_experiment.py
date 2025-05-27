@@ -84,10 +84,34 @@ try:
         class MultiModalTrainer:
             def __init__(self, config, output_dir): 
                 self.config = config
+                self.output_dir = output_dir
                 self.train_history = {'val_f1': [0.5+np.random.rand()*0.1], 'val_auc': [0.6+np.random.rand()*0.1], 'train_loss': [0.5], 'val_loss': [0.5]}
             def train(self, data): 
                 print("Mock: Training MultiModal model...")
-                return self
+                num_test_samples = 0
+                if 'labels' in data and hasattr(data['labels'], '__len__'):
+                    num_test_samples = len(data['labels']) // 5 
+                    if num_test_samples == 0 and len(data['labels']) > 0:
+                        num_test_samples = 1
+                
+                mock_y_true = np.random.randint(0, 2, num_test_samples) if num_test_samples > 0 else np.array([])
+                # Ensure mock_y_pred_proba has shape (num_test_samples, 2) for binary classification
+                mock_y_pred_proba = np.random.rand(num_test_samples, 2) if num_test_samples > 0 else np.array([])
+                if num_test_samples > 0 and mock_y_pred_proba.shape[0] > 0 : # Normalize probabilities to sum to 1 per sample
+                    mock_y_pred_proba = mock_y_pred_proba / np.sum(mock_y_pred_proba, axis=1, keepdims=True)
+
+
+                mock_test_metrics = {
+                    'f1': 0.55 + np.random.rand() * 0.1 if num_test_samples > 0 else 0.0,
+                    'auc': 0.65 + np.random.rand() * 0.1 if num_test_samples > 0 else 0.0,
+                    'precision': 0.5 + np.random.rand() * 0.1 if num_test_samples > 0 else 0.0,
+                    'recall': 0.6 + np.random.rand() * 0.1 if num_test_samples > 0 else 0.0,
+                    'accuracy': 0.6 + np.random.rand() * 0.1 if num_test_samples > 0 else 0.0,
+                    'fpr': 0.2 + np.random.rand() * 0.1 if num_test_samples > 0 else 0.0, # Mock FPR
+                    'y_true': mock_y_true,
+                    'y_pred_proba': mock_y_pred_proba
+                }
+                return self, mock_test_metrics
     
     # 导入工具模块 (relative to parent_dir)
     from experiments.utils.wandb_utils import init_wandb
@@ -344,11 +368,15 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
         
         # 记录传统ML结果到WandB
         for model_type, model_results in traditional_results.items():
-            if 'error' not in model_results:
+            if 'error' not in model_results and 'test_metrics' in model_results:
+                tm = model_results['test_metrics']
                 wandb_logger.log_metrics({
-                    f"{model_type}_test_f1": model_results['test_metrics']['f1'],
-                    f"{model_type}_test_auc": model_results['test_metrics']['auc'],
-                    f"{model_type}_test_accuracy": model_results['test_metrics']['accuracy']
+                    f"{model_type}_test_f1": tm.get('f1', 0.0),
+                    f"{model_type}_test_auc": tm.get('auc', 0.0),
+                    f"{model_type}_test_accuracy": tm.get('accuracy', 0.0),
+                    f"{model_type}_test_precision": tm.get('precision', 0.0),
+                    f"{model_type}_test_recall": tm.get('recall', 0.0),
+                    f"{model_type}_test_fpr": tm.get('fpr', 0.0) # 假设fpr已计算
                 })
                 
                 # 记录特征重要性
@@ -358,19 +386,30 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
                         model_results['feature_importance'],
                         title=f"{model_type.title()} Feature Importance"
                     )
+                
+                # 记录ROC曲线 (如果数据存在)
+                if 'y_true' in tm and 'y_pred_proba' in tm and \
+                   isinstance(tm['y_true'], np.ndarray) and isinstance(tm['y_pred_proba'], np.ndarray) and \
+                   len(tm['y_true']) > 0 and len(tm['y_pred_proba']) > 0 and \
+                   tm['y_pred_proba'].ndim == 2 and tm['y_pred_proba'].shape[1] >=2: # Ensure proba has at least 2 classes for ROC
+                    try:
+                        wandb_logger.log_roc_curve(tm['y_true'], tm['y_pred_proba'], title=f"{model_type.title()} ROC Curve")
+                    except Exception as e_roc:
+                        logger.warning(f"WandB: 绘制 {model_type} ROC曲线失败: {e_roc}")
         
         results['models'].update(traditional_results)
         
         # 2. 多模态模型
         logger.info("🧠 训练多模态模型...")
         multimodal_trainer = MultiModalTrainer(config=config, output_dir=output_dir)
-        multimodal_model = multimodal_trainer.train(training_data)
+        multimodal_model, multimodal_test_metrics = multimodal_trainer.train(training_data)
         
         # 获取多模态模型结果
         multimodal_results = {
             'model_type': 'multimodal',
             'train_history': multimodal_trainer.train_history,
-            'model_path': os.path.join(output_dir, 'best_model.pth')
+            'model_path': os.path.join(output_dir, 'best_model.pth'),
+            'test_metrics': multimodal_test_metrics
         }
         
         # 记录多模态结果到WandB
@@ -386,7 +425,27 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
             
             # 记录训练曲线
             wandb_logger.log_training_curves(history, "Multimodal Training Curves")
-        
+
+        if multimodal_test_metrics: # 记录测试集指标
+            mm_tm = multimodal_test_metrics
+            wandb_logger.log_metrics({
+                f"multimodal_test_f1": mm_tm.get('f1', 0.0),
+                f"multimodal_test_auc": mm_tm.get('auc', 0.0),
+                f"multimodal_test_accuracy": mm_tm.get('accuracy', 0.0),
+                f"multimodal_test_precision": mm_tm.get('precision', 0.0),
+                f"multimodal_test_recall": mm_tm.get('recall', 0.0),
+                f"multimodal_test_fpr": mm_tm.get('fpr', 0.0)
+            })
+            # 记录ROC曲线 (如果数据存在)
+            if 'y_true' in mm_tm and 'y_pred_proba' in mm_tm and \
+               isinstance(mm_tm['y_true'], np.ndarray) and isinstance(mm_tm['y_pred_proba'], np.ndarray) and \
+               len(mm_tm['y_true']) > 0 and len(mm_tm['y_pred_proba']) > 0 and \
+               mm_tm['y_pred_proba'].ndim == 2 and mm_tm['y_pred_proba'].shape[1] >=2:
+                try:
+                    wandb_logger.log_roc_curve(mm_tm['y_true'], mm_tm['y_pred_proba'], title="Multimodal ROC Curve")
+                except Exception as e_roc_mm:
+                    logger.warning(f"WandB: 绘制多模态ROC曲线失败: {e_roc_mm}")
+
         results['models']['multimodal'] = multimodal_results
         
         # 3. 性能对比总结
@@ -395,33 +454,58 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
         
         for model_name, model_result in results['models'].items():
             if 'error' not in model_result:
+                metrics_to_log = {}
                 if model_name == 'multimodal':
-                    # 多模态模型使用训练历史中的最佳验证分数
-                    history = model_result.get('train_history', {})
-                    f1_score = max(history.get('val_f1', [0.0])) if history.get('val_f1') else 0.0
-                    auc_score = max(history.get('val_auc', [0.0])) if history.get('val_auc') else 0.0
+                    # 多模态模型使用测试集分数 (如果存在)，否则回退到验证集分数
+                    test_metrics = model_result.get('test_metrics', {})
+                    if test_metrics: # 优先使用测试集指标
+                        metrics_to_log['f1_score'] = test_metrics.get('f1', 0.0)
+                        metrics_to_log['auc_score'] = test_metrics.get('auc', 0.0)
+                        metrics_to_log['precision'] = test_metrics.get('precision', 0.0)
+                        metrics_to_log['recall'] = test_metrics.get('recall', 0.0)
+                        metrics_to_log['accuracy'] = test_metrics.get('accuracy', 0.0)
+                        metrics_to_log['fpr'] = test_metrics.get('fpr', 0.0) 
+                    else: # 回退到验证集指标 (主要用于F1和AUC)
+                        history = model_result.get('train_history', {})
+                        metrics_to_log['f1_score'] = max(history.get('val_f1', [0.0])) if history.get('val_f1') else 0.0
+                        metrics_to_log['auc_score'] = max(history.get('val_auc', [0.0])) if history.get('val_auc') else 0.0
+                        # 对于验证集，通常不直接计算precision/recall/fpr，除非显式提供
+                        metrics_to_log['precision'] = 0.0 
+                        metrics_to_log['recall'] = 0.0
+                        metrics_to_log['accuracy'] = 0.0
+                        metrics_to_log['fpr'] = 0.0
                 else:
                     # 传统ML模型使用测试分数
-                    f1_score = model_result.get('test_metrics', {}).get('f1', 0.0)
-                    auc_score = model_result.get('test_metrics', {}).get('auc', 0.0)
+                    test_metrics = model_result.get('test_metrics', {})
+                    metrics_to_log['f1_score'] = test_metrics.get('f1', 0.0)
+                    metrics_to_log['auc_score'] = test_metrics.get('auc', 0.0)
+                    metrics_to_log['precision'] = test_metrics.get('precision', 0.0)
+                    metrics_to_log['recall'] = test_metrics.get('recall', 0.0)
+                    metrics_to_log['accuracy'] = test_metrics.get('accuracy', 0.0)
+                    metrics_to_log['fpr'] = test_metrics.get('fpr', 0.0)
                 
-                comparison_summary[model_name] = {
-                    'f1_score': f1_score,
-                    'auc_score': auc_score
-                }
+                comparison_summary[model_name] = metrics_to_log
         
         results['comparison_summary'] = comparison_summary
         
-        # 记录对比结果到WandB
-        model_names = list(comparison_summary.keys())
-        f1_scores = [comparison_summary[name]['f1_score'] for name in model_names]
+        # 记录对比结果到WandB (这里保留F1，但可扩展)
+        model_names_for_chart = list(comparison_summary.keys())
+        f1_scores_for_chart = [comparison_summary[name]['f1_score'] for name in model_names_for_chart]
         
-        wandb_logger.log_ablation_results(model_names, f1_scores)
+        wandb_logger.log_ablation_results(model_names_for_chart, f1_scores_for_chart, title="Baseline Model F1 Comparison")
+        # 可以添加更多图表，例如 AUC comparison_summary[name]['auc_score'] 等
         
         logger.info("✅ 基线对比实验完成")
         logger.info("📈 模型性能对比:")
-        for model_name, metrics in comparison_summary.items():
-            logger.info(f"   {model_name}: F1={metrics['f1_score']:.4f}, AUC={metrics['auc_score']:.4f}")
+        for model_name, metrics_dict in comparison_summary.items():
+            log_str = f"   {model_name}: "
+            log_str += f"F1={metrics_dict.get('f1_score', 0.0):.4f}, "
+            log_str += f"AUC={metrics_dict.get('auc_score', 0.0):.4f}, "
+            log_str += f"Precision={metrics_dict.get('precision', 0.0):.4f}, "
+            log_str += f"Recall={metrics_dict.get('recall', 0.0):.4f}, "
+            log_str += f"Accuracy={metrics_dict.get('accuracy', 0.0):.4f}, "
+            log_str += f"FPR={metrics_dict.get('fpr', 0.0):.4f}"
+            logger.info(log_str)
         
         return results
         
@@ -498,14 +582,15 @@ def run_tune_experiment(config: Config, output_dir: str, logger: logging.Logger)
         
         # 重新训练最佳模型
         best_trainer = MultiModalTrainer(config=config, output_dir=os.path.join(output_dir, 'best_model'))
-        best_model = best_trainer.train(training_data)
+        best_model, best_test_metrics = best_trainer.train(training_data)
         
         results = {
             'experiment_type': 'tuning',
             'tuning_results': tuning_results,
             'best_params': best_params,
             'best_score': tuning_results['best_value'],
-            'final_model_path': os.path.join(output_dir, 'best_model', 'best_model.pth')
+            'final_model_path': os.path.join(output_dir, 'best_model', 'best_model.pth'),
+            'test_metrics': best_test_metrics
         }
         
         # 记录最终结果到WandB
@@ -594,7 +679,7 @@ def run_ablation_experiment(config: Config, output_dir: str, logger: logging.Log
                 
                 # 训练模型
                 trainer = MultiModalTrainer(config=combo_config, output_dir=combo_output_dir)
-                model = trainer.train(training_data)
+                model, test_metrics = trainer.train(training_data)
                 
                 # 获取最佳验证F1分数
                 train_history = trainer.train_history
@@ -604,7 +689,8 @@ def run_ablation_experiment(config: Config, output_dir: str, logger: logging.Log
                     'modalities': combination['modalities'],
                     'best_val_f1': best_f1,
                     'train_history': train_history,
-                    'model_path': os.path.join(combo_output_dir, 'best_model.pth')
+                    'model_path': os.path.join(combo_output_dir, 'best_model.pth'),
+                    'test_metrics': test_metrics
                 }
                 
                 results['combinations'][combination['name']] = combo_result

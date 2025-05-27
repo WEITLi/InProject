@@ -26,6 +26,8 @@ import warnings
 from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
+import logging # 导入 logging
+from collections import Counter # 导入 Counter
 
 warnings.filterwarnings('ignore')
 
@@ -51,56 +53,110 @@ except ImportError:
 class MultiModalDataset(Dataset):
     """多模态数据集类"""
     
-    def __init__(self, training_data: Dict[str, Any]):
+    def __init__(self, data: Dict[str, Any], model_config: ModelConfig, data_config: DataConfig):
         """
         初始化多模态数据集
         
         Args:
-            training_data: 训练数据字典
+            data: 训练数据字典
+            model_config: 模型配置对象
+            data_config: 数据配置对象
         """
-        # self.device = device # Removed: Tensors will stay on CPU here
-        
-        # 转换数据为tensor (保持在 CPU 上)
-        self.behavior_sequences = torch.FloatTensor(training_data['behavior_sequences'])
-        self.node_features = torch.FloatTensor(training_data['node_features'])
-        self.adjacency_matrix = torch.FloatTensor(training_data['adjacency_matrix'])
-        self.text_content = training_data['text_content']  # 保持为字符串列表
-        self.structured_features = torch.FloatTensor(training_data['structured_features'])
-        self.labels = torch.LongTensor(training_data['labels'])
-        
-        self.users = training_data['users']
-        self.user_to_index = training_data['user_to_index']
+        self.model_config = model_config
+        self.data_config = data_config
 
-        if 'user_indices_in_graph' in training_data:
-            self.user_indices_in_graph = torch.LongTensor(training_data['user_indices_in_graph'])
-            print(f"  用户图索引已加载，长度: {len(self.user_indices_in_graph)}")
-        else:
-            print("警告: training_data 中缺少 'user_indices_in_graph'。GNN 可能无法正确对齐用户。")
-            self.user_indices_in_graph = torch.full((len(self.labels),), -1, dtype=torch.long)
+        self.labels = data.get('labels', np.array([]))
+        self.users = data.get('users', [])
+
+        # Behavior sequences
+        self.behavior_sequences = data.get('behavior_sequences', np.array([]))
+        # Text content
+        self.text_content = data.get('text_content', [])
+        # Structured features
+        self.structured_features = data.get('structured_features', np.array([]))
         
-        print(f"数据集初始化完成 (数据将在训练循环中移至设备):")
-        print(f"  样本数: {len(self.labels)}")
-        print(f"  行为序列形状: {self.behavior_sequences.shape}")
-        print(f"  节点特征形状: {self.node_features.shape}")
-        print(f"  邻接矩阵形状: {self.adjacency_matrix.shape}")
-        print(f"  结构化特征形状: {self.structured_features.shape}")
-        print(f"  正常样本: {torch.sum(self.labels == 0).item()}")
-        print(f"  异常样本: {torch.sum(self.labels == 1).item()}")
-    
+        # Graph-related features (some global, some per-sample)
+        self.node_features = data.get('node_features', np.array([]))
+        self.adjacency_matrix = data.get('adjacency_matrix', np.array([]))
+        self.user_to_index = data.get('user_to_index', {})
+        self.user_indices_in_graph = data.get('user_indices_in_graph', np.array([]))
+
+        if len(self.labels) == 0:
+            print("Warning: MultiModalDataset initialized with no labels.")
+            # Depending on the use case, you might want to raise an error here
+            # or ensure that __len__ returns 0 correctly.
+            # For now, length will be 0, which might be handled by DataLoader.
+
     def __len__(self):
         return len(self.labels)
     
-    def __getitem__(self, idx):
-        return {
-            'behavior_sequences': self.behavior_sequences[idx],
-            'node_features': self.node_features,  # 所有样本共享节点特征
-            'adjacency_matrix': self.adjacency_matrix,  # 所有样本共享邻接矩阵
-            'text_content': self.text_content[idx],  # 修改：直接返回字符串
-            'structured_features': self.structured_features[idx],
-            'labels': self.labels[idx],
-            'user': self.users[idx],
-            'user_index_in_graph': self.user_indices_in_graph[idx] # 添加图索引
-        }
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        item = {}
+        
+        # Labels (must exist if len > 0)
+        if len(self.labels) > 0 :
+            item['labels'] = torch.tensor(self.labels[idx], dtype=torch.long)
+        else:
+            # This case should ideally not be reached if DataLoader uses __len__ correctly.
+            # If __len__ is 0, __getitem__ shouldn't be called.
+            # However, as a fallback:
+            item['labels'] = torch.tensor(-1, dtype=torch.long) # Placeholder label
+
+        # Behavior Sequences
+        if hasattr(self.behavior_sequences, 'shape') and self.behavior_sequences.shape[0] > 0:
+            item['behavior_sequences'] = torch.tensor(self.behavior_sequences[idx], dtype=torch.float32)
+        else:
+            seq_len = getattr(self.model_config, 'sequence_length', 128) # Default if not in config
+            feat_dim = getattr(self.data_config, 'feature_dim', 256)    # Default if not in config
+            item['behavior_sequences'] = torch.zeros((seq_len, feat_dim), dtype=torch.float32)
+
+        # Text Content
+        if self.text_content and idx < len(self.text_content): # Check if list is not empty and idx is valid
+            item['text_content'] = self.text_content[idx] 
+        else:
+            item['text_content'] = "" # Placeholder for missing text
+
+        # Structured Features
+        if hasattr(self.structured_features, 'shape') and self.structured_features.shape[0] > 0:
+            item['structured_features'] = torch.tensor(self.structured_features[idx], dtype=torch.float32)
+        else:
+            # Ensure structure_feat_dim is an attribute of model_config or provide a sensible default
+            struct_dim = getattr(self.model_config, 'structure_feat_dim', 50) # Default if not in config
+            item['structured_features'] = torch.zeros(struct_dim, dtype=torch.float32)
+
+        # User indices in graph (per-sample data for GNN batching)
+        if hasattr(self.user_indices_in_graph, 'shape') and self.user_indices_in_graph.shape[0] > 0:
+            item['batch_user_indices_in_graph'] = torch.tensor(self.user_indices_in_graph[idx], dtype=torch.long)
+        else:
+            item['batch_user_indices_in_graph'] = torch.tensor(-1, dtype=torch.long) # Placeholder if no graph or user not in graph
+
+        # Global graph features - node_features
+        if hasattr(self.node_features, 'shape') and self.node_features.size > 0 and self.node_features.ndim > 1:
+            # Ensure it's at least 2D (e.g., num_nodes, num_features)
+            # self.node_features comes from data.get('node_features', np.array([]))
+            # If it was np.array([]), .size is 0. If it was np.zeros((0, D)), .size is 0.
+            # If it was np.zeros((1, D)), .size is D.
+            item['node_features'] = torch.tensor(self.node_features, dtype=torch.float32)
+        else:
+            # Placeholder for node_features. 
+            # The GNN input dimension will be determined by create_model based on this.
+            # Use a reasonably small default, e.g., model_config.gnn_hidden_dim or a fixed small number.
+            # Using a fixed number like 10 for placeholder if gnn_hidden_dim is too large or not set.
+            default_node_feat_dim = getattr(self.model_config, 'gnn_input_dim_placeholder', getattr(self.model_config, 'gnn_hidden_dim', 10))
+            if default_node_feat_dim <= 0: default_node_feat_dim = 10 # Ensure positive dimension
+            item['node_features'] = torch.zeros((1, default_node_feat_dim), dtype=torch.float32) # Min 1 node, N features
+
+        # Global graph features - adjacency_matrix
+        if hasattr(self.adjacency_matrix, 'shape') and self.adjacency_matrix.size > 0 and self.adjacency_matrix.ndim > 1:
+            item['adjacency_matrix'] = torch.tensor(self.adjacency_matrix, dtype=torch.float32)
+        else:
+            # Placeholder for adjacency_matrix
+            item['adjacency_matrix'] = torch.zeros((1, 1), dtype=torch.float32) # Min 1x1 matrix
+
+        # user_to_index is a dict, not typically returned per item unless specifically needed by model per batch.
+        # item['user_to_index'] = self.user_to_index
+
+        return item
 
 class EarlyStopping:
     """早停机制"""
@@ -201,10 +257,11 @@ class MultiModalTrainer:
         Returns:
             训练、验证、测试数据加载器
         """
-        print("准备数据加载器...")
+        logger = logging.getLogger(__name__) # 获取logger实例
+        logger.info("准备数据加载器...")
         
         # 创建数据集 (不再传递 device)
-        dataset = MultiModalDataset(training_data)
+        dataset = MultiModalDataset(training_data, self.config.model, self.config.data)
         
         # 划分数据集
         total_size = len(dataset)
@@ -217,6 +274,8 @@ class MultiModalTrainer:
             generator=torch.Generator().manual_seed(self.config.seed)
         )
         
+        logger.info(f"数据集划分: 总计={total_size}, 训练集={train_size}, 验证集={val_size}, 测试集={test_size}")
+
         # 创建数据加载器
         train_loader = DataLoader(
             train_dataset, 
@@ -370,8 +429,8 @@ class MultiModalTrainer:
             }
             
             # 添加批处理用户在图中的索引 (如果存在)
-            if 'user_index_in_graph' in batch:
-                inputs['batch_user_indices_in_graph'] = batch['user_index_in_graph']
+            if 'batch_user_indices_in_graph' in batch:
+                inputs['batch_user_indices_in_graph'] = batch['batch_user_indices_in_graph']
             
             labels = batch['labels']
             
@@ -446,6 +505,10 @@ class MultiModalTrainer:
         all_labels = []
         all_probabilities = []
         
+        # 获取logger实例，用于可能的消融实验特定日志
+        logger = logging.getLogger(__name__)
+        is_ablation_single_modality_run = len(self.config.model.enabled_modalities) == 1
+
         with torch.no_grad():
             for batch_cpu in val_loader:
                 # 将批次中的张量移动到目标设备
@@ -460,8 +523,8 @@ class MultiModalTrainer:
                     'structured_features': batch['structured_features']
                 }
                 # 添加批处理用户在图中的索引 (如果存在)
-                if 'user_index_in_graph' in batch:
-                    inputs['batch_user_indices_in_graph'] = batch['user_index_in_graph']
+                if 'batch_user_indices_in_graph' in batch:
+                    inputs['batch_user_indices_in_graph'] = batch['batch_user_indices_in_graph']
                 
                 labels = batch['labels']
                 
@@ -503,6 +566,12 @@ class MultiModalTrainer:
         accuracy = accuracy_score(all_labels, all_predictions)
         f1 = f1_score(all_labels, all_predictions, average='weighted')
         
+        if is_ablation_single_modality_run:
+            logger.info(f"[Ablation Val] Enabled Modalities: {self.config.model.enabled_modalities}")
+            logger.info(f"[Ablation Val] Validation Labels Counter: {Counter(all_labels)}")
+            logger.info(f"[Ablation Val] Validation Predictions Counter: {Counter(all_predictions)}")
+            logger.info(f"[Ablation Val] Validation F1 (weighted): {f1:.5f}, Accuracy: {accuracy:.5f}")
+
         # 计算AUC（如果有正负样本）
         try:
             auc = roc_auc_score(all_labels, all_probabilities)
