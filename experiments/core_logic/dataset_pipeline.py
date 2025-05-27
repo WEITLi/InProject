@@ -307,7 +307,9 @@ class CERTDatasetPipeline:
             sample_ratio: 数据采样比例 (0-1)，用于快速测试
             force_regenerate: 是否强制重新生成周数据 Parquet 文件集
         """
-        # 优化的Dask初始化配置
+        # 检测运行环境并优化Dask配置
+        is_colab = 'google.colab' in str(get_ipython()) if 'get_ipython' in globals() else False
+        
         try:
             client = Client(timeout="2s", processes=False) 
             print(f"🎛️  Connected to existing Dask client: {client}")
@@ -318,27 +320,49 @@ class CERTDatasetPipeline:
             import psutil
             total_memory_gb = psutil.virtual_memory().total / (1024**3)
             available_memory_gb = psutil.virtual_memory().available / (1024**3)
+            cpu_count = psutil.cpu_count()
             
-            # 计算每个worker的内存限制 (使用80%的可用内存)
-            memory_per_worker_gb = (available_memory_gb * 0.8) / self.num_cores
+            # 根据环境调整配置
+            if is_colab:
+                print("   🔬 检测到Google Colab环境，使用保守配置")
+                memory_fraction = 0.6  # Colab更保守
+                n_workers = min(2, self.num_cores)  # Colab最多2个worker
+                threads_per_worker = 1
+                use_processes = False  # Colab使用线程
+                memory_target = 0.85
+                memory_spill = 0.75
+                memory_pause = 0.80
+            else:
+                print("   🖥️  检测到本地环境，使用积极配置")
+                memory_fraction = 0.8
+                n_workers = self.num_cores
+                threads_per_worker = 2
+                use_processes = True
+                memory_target = 0.95
+                memory_spill = 0.85
+                memory_pause = 0.90
+            
+            # 计算每个worker的内存限制
+            memory_per_worker_gb = (available_memory_gb * memory_fraction) / n_workers
             memory_per_worker = f"{memory_per_worker_gb:.1f}GB"
             
             print(f"   💾 系统总内存: {total_memory_gb:.1f}GB, 可用内存: {available_memory_gb:.1f}GB")
-            print(f"   ⚙️  配置: {self.num_cores} workers, 每个worker {memory_per_worker}")
+            print(f"   🔧 CPU核心数: {cpu_count}, 使用workers: {n_workers}")
+            print(f"   ⚙️  配置: {n_workers} workers, 每个worker {memory_per_worker}")
             
-            # 优化的LocalCluster配置
+            # 创建LocalCluster
             cluster = LocalCluster(
-                n_workers=self.num_cores,
-                threads_per_worker=2,  # 增加线程数以提高并行度
-                memory_limit=memory_per_worker,  # 设置具体的内存限制
-                processes=True,  # 使用进程而非线程，避免GIL限制
-                dashboard_address=':8787',  # 固定dashboard端口
-                silence_logs=False,  # 保留日志以便调试
-                # 优化配置
+                n_workers=n_workers,
+                threads_per_worker=threads_per_worker,
+                memory_limit=memory_per_worker,
+                processes=use_processes,
+                dashboard_address=':8787' if not is_colab else None,  # Colab可能不支持dashboard
+                silence_logs=False,
+                # 环境特定的worker配置
                 worker_kwargs={
-                    'memory_target_fraction': 0.95,  # 目标内存使用率
-                    'memory_spill_fraction': 0.85,   # 开始溢出到磁盘的阈值
-                    'memory_pause_fraction': 0.90,   # 暂停接收新任务的阈值
+                    'memory_target_fraction': memory_target,
+                    'memory_spill_fraction': memory_spill,
+                    'memory_pause_fraction': memory_pause,
                 }
             )
             client = Client(cluster)
@@ -470,25 +494,32 @@ class CERTDatasetPipeline:
                     # 获取文件大小来动态调整blocksize
                     file_size_mb = os.path.getsize(actual_file_path) / (1024 * 1024)
                     
-                    # 根据文件大小和worker数量动态调整blocksize
-                    if file_size_mb > 1000:  # 大于1GB的文件
-                        blocksize = f"{max(32, int(file_size_mb / (self.num_cores * 4)))}MB"
-                    elif file_size_mb > 100:  # 100MB-1GB的文件
-                        blocksize = f"{max(16, int(file_size_mb / (self.num_cores * 2)))}MB"
-                    else:  # 小文件
-                        blocksize = "16MB"
+                    # 根据环境和文件大小动态调整blocksize
+                    if is_colab:
+                        # Colab环境使用更小的blocksize以避免内存问题
+                        if file_size_mb > 1000:  # 大于1GB的文件
+                            blocksize = f"{max(16, int(file_size_mb / (n_workers * 8)))}MB"
+                        elif file_size_mb > 100:  # 100MB-1GB的文件
+                            blocksize = f"{max(8, int(file_size_mb / (n_workers * 4)))}MB"
+                        else:  # 小文件
+                            blocksize = "8MB"
+                    else:
+                        # 本地环境使用原来的逻辑
+                        if file_size_mb > 1000:  # 大于1GB的文件
+                            blocksize = f"{max(32, int(file_size_mb / (self.num_cores * 4)))}MB"
+                        elif file_size_mb > 100:  # 100MB-1GB的文件
+                            blocksize = f"{max(16, int(file_size_mb / (self.num_cores * 2)))}MB"
+                        else:  # 小文件
+                            blocksize = "16MB"
                     
                     print(f"     文件大小: {file_size_mb:.1f}MB, 使用blocksize: {blocksize}")
                     
                     ddf = dd.read_csv(
                         actual_file_path, 
-                        low_memory=False, 
                         blocksize=blocksize,
-                        # 优化CSV读取参数
-                        engine='c',  # 使用C引擎
-                        dtype_backend='numpy_nullable',  # 使用更高效的数据类型
-                        # 预分配更多内存给pandas
-                        chunksize=None  # 让Dask自动处理分块
+                        # 基本优化参数
+                        low_memory=False
+                        # 注意：Dask的read_csv参数与pandas不完全相同
                     )
                     
                     # 如果指定了 sample_ratio < 1.0, Dask也支持采样
@@ -521,17 +552,27 @@ class CERTDatasetPipeline:
         print(f"   当前分区数: {current_partitions}")
         
         # 动态计算最优分区大小
-        # 目标：每个分区使用约200-500MB内存，确保充分利用worker内存
         import psutil
         available_memory_gb = psutil.virtual_memory().available / (1024**3)
-        target_partition_size_mb = min(500, max(200, int((available_memory_gb * 0.6 * 1024) / (self.num_cores * 2))))
+        
+        if is_colab:
+            # Colab环境使用更小的分区
+            target_partition_size_mb = min(128, max(64, int((available_memory_gb * 0.4 * 1024) / (n_workers * 2))))
+            max_partitions = n_workers * 4
+            min_partitions = n_workers
+        else:
+            # 本地环境使用原来的逻辑
+            target_partition_size_mb = min(500, max(200, int((available_memory_gb * 0.6 * 1024) / (self.num_cores * 2))))
+            max_partitions = self.num_cores * 8
+            min_partitions = self.num_cores
+            
         target_partition_size = f"{target_partition_size_mb}MB"
         
         print(f"⚙️ 重新分区以优化内存使用...")
         print(f"   目标分区大小: {target_partition_size} (基于可用内存 {available_memory_gb:.1f}GB)")
         
         # 如果分区数太多或太少，进行重新分区
-        if current_partitions > self.num_cores * 8 or current_partitions < self.num_cores:
+        if current_partitions > max_partitions or current_partitions < min_partitions:
             combined_ddf = combined_ddf.repartition(partition_size=target_partition_size)
             print(f"   重新分区完成: {combined_ddf.npartitions} 个分区")
         else:

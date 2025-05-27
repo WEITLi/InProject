@@ -1,0 +1,71 @@
+# Google Colab专用Dask内存优化配置
+# Colab环境特点：12-16GB RAM，2个CPU核心，有时间限制
+
+# 系统配置 - 针对Colab优化
+system:
+  # Colab内存较少，使用70%避免OOM
+  memory_usage_fraction: 0.7
+  # Colab通常只有2个CPU核心
+  threads_per_worker: 1
+  # Colab环境建议使用线程而非进程
+  use_processes: false
+
+# 内存管理 - 保守配置
+memory:
+  # 降低目标内存使用率
+  target_fraction: 0.85
+  # 更早开始溢出
+  spill_fraction: 0.75
+  # 更早暂停
+  pause_fraction: 0.80
+  # 更早终止
+  terminate_fraction: 0.90
+
+# 数据处理 - 小分区策略
+data_processing:
+  # 使用较小的分区以适应Colab内存限制
+  min_partition_size_mb: 64
+  max_partition_size_mb: 256
+  default_partition_size_mb: 128
+  # 更保守的文件分块策略
+  large_file_factor: 8  # 更多分块
+  medium_file_factor: 4
+
+# I/O优化 - 适合Colab网络环境
+io:
+  compression: "lz4"
+  query_planning: true
+  shuffle_method: "tasks"
+  array_chunk_size: "128MB"  # 减小chunk大小
+
+# Parquet写入优化 - 适合Colab存储
+parquet:
+  compression: "snappy"
+  compression_level: 1
+  row_group_size: 50000  # 减小行组大小
+  data_page_size: 524288  # 512KB
+  write_batch_size: 5000
+  use_dictionary: true
+
+# 网络优化 - 适合Colab网络
+network:
+  connect_timeout: 30
+  tcp_timeout: 30
+  allowed_failures: 5
+  work_stealing_interval: 200
+
+# 调试和监控
+debug:
+  verbose_logging: true
+  show_memory_monitor: true
+  memory_monitor_interval: 15  # 更频繁监控
+  save_performance_report: false
+
+# Colab特定设置
+colab:
+  # 启用更频繁的垃圾回收
+  frequent_gc: true
+  # 使用更小的worker数量
+  max_workers: 2
+  # 启用内存压缩
+  memory_compression: true 
