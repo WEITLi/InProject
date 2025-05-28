@@ -15,14 +15,14 @@ data:
 
 model:
   hidden_dim: 256
-  num_heads: 8
-  num_layers: 6
+  num_heads: 12
+  num_layers: 8
   sequence_length: 128
   dropout: 0.1
   enabled_modalities: ["behavior", "graph", "text", "structured"]
 
 training:
-  epochs: 20
+  epochs: 30
   batch_size: 64
   learning_rate: 0.001
   weight_decay: 0.0001
