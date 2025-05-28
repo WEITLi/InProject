@@ -116,6 +116,7 @@ try:
     # 导入工具模块 (relative to parent_dir)
     from experiments.utils.wandb_utils import init_wandb
     from experiments.utils.baseline_models import BaselineModelTrainer, run_baseline_comparison
+    from experiments.utils.improved_baseline_models import run_improved_baseline_comparison  # 新增改进版baseline
     from experiments.utils.imbalance_utils import run_imbalance_experiment as utils_run_imbalance_experiment, ImbalanceHandler
     from experiments.utils.optuna_tuning import run_optuna_tuning, get_multimodal_search_space
     
@@ -190,7 +191,9 @@ def load_config(config_file: Optional[str] = None, **kwargs) -> Config:
         'num_layers': 6,
         'n_trials': 20,
         'num_cores': 8,
-        'seed': 42
+        'seed': 42,
+        'use_improved_baseline': False,
+        'baseline_cv_folds': 5
     }
 
     file_values_loaded = {}
@@ -222,6 +225,8 @@ def load_config(config_file: Optional[str] = None, **kwargs) -> Config:
                  if hasattr(config, section_name):
                     setattr(config, section_name, section_values)
                     file_values_loaded[section_name] = section_values # 包括 num_workers
+            elif key in ['use_improved_baseline', 'baseline_cv_folds']: # 改进版baseline参数
+                target_section_obj = config
             else:
                 # 对于配置文件中存在，但Config类中完全没有对应属性或节的键，可以选择忽略或警告
                 pass
@@ -245,6 +250,8 @@ def load_config(config_file: Optional[str] = None, **kwargs) -> Config:
                          'fusion_type', 'num_classes', 'head_dropout']:
                 target_section_obj = config.model
             elif key in ['n_trials', 'seed', 'num_workers']: # 直接在Config根上的属性，包括 num_workers
+                target_section_obj = config
+            elif key in ['use_improved_baseline', 'baseline_cv_folds']: # 改进版baseline参数
                 target_section_obj = config
             else:
                 if hasattr(config, key):
@@ -365,43 +372,80 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
         results = {'experiment_type': 'baseline', 'models': {}}
         
         # 1. 传统机器学习基线
-        logger.info("🤖 训练传统机器学习基线模型...")
-        traditional_results = run_baseline_comparison(
-            training_data, 
-            output_dir,
-            models=["random_forest", "xgboost"]
-        )
+        logger.info("🔧 训练传统机器学习基线模型...")
         
-        # 记录传统ML结果到WandB
-        for model_type, model_results in traditional_results.items():
-            if 'error' not in model_results and 'test_metrics' in model_results:
-                tm = model_results['test_metrics']
-                wandb_logger.log_metrics({
-                    f"{model_type}_test_f1": tm.get('f1', 0.0),
-                    f"{model_type}_test_auc": tm.get('auc', 0.0),
-                    f"{model_type}_test_accuracy": tm.get('accuracy', 0.0),
-                    f"{model_type}_test_precision": tm.get('precision', 0.0),
-                    f"{model_type}_test_recall": tm.get('recall', 0.0),
-                    f"{model_type}_test_fpr": tm.get('fpr', 0.0) # 假设fpr已计算
-                })
-                
-                # 记录特征重要性
-                if 'feature_importance' in model_results and 'feature_names' in model_results:
-                    wandb_logger.log_feature_importance(
-                        model_results['feature_names'],
-                        model_results['feature_importance'],
-                        title=f"{model_type.title()} Feature Importance"
-                    )
-                
-                # 记录ROC曲线 (如果数据存在)
-                if 'y_true' in tm and 'y_pred_proba' in tm and \
-                   isinstance(tm['y_true'], np.ndarray) and isinstance(tm['y_pred_proba'], np.ndarray) and \
-                   len(tm['y_true']) > 0 and len(tm['y_pred_proba']) > 0 and \
-                   tm['y_pred_proba'].ndim == 2 and tm['y_pred_proba'].shape[1] >=2: # Ensure proba has at least 2 classes for ROC
-                    try:
-                        wandb_logger.log_roc_curve(tm['y_true'], tm['y_pred_proba'], title=f"{model_type.title()} ROC Curve")
-                    except Exception as e_roc:
-                        logger.warning(f"WandB: 绘制 {model_type} ROC曲线失败: {e_roc}")
+        # 检查是否使用改进版baseline模型
+        use_improved_baseline = getattr(config, 'use_improved_baseline', False)
+        
+        if use_improved_baseline:
+            logger.info("🔧 使用改进版基线模型...")
+            traditional_results = run_improved_baseline_comparison(
+                training_data, 
+                output_dir,
+                models=["random_forest", "xgboost"],
+                cv_folds=getattr(config, 'baseline_cv_folds', 5)
+            )
+            
+            # 记录改进版传统ML结果到WandB
+            for model_type, model_results in traditional_results.items():
+                if 'error' not in model_results and 'cv_results' in model_results:
+                    cv_results = model_results['cv_results']
+                    wandb_logger.log_metrics({
+                        f"{model_type}_cv_f1_mean": cv_results.get('f1_test_mean', 0.0),
+                        f"{model_type}_cv_f1_std": cv_results.get('f1_test_std', 0.0),
+                        f"{model_type}_cv_auc_mean": cv_results.get('roc_auc_test_mean', 0.0),
+                        f"{model_type}_cv_auc_std": cv_results.get('roc_auc_test_std', 0.0),
+                        f"{model_type}_cv_precision_mean": cv_results.get('precision_test_mean', 0.0),
+                        f"{model_type}_cv_recall_mean": cv_results.get('recall_test_mean', 0.0),
+                        f"{model_type}_cv_pr_auc_mean": cv_results.get('average_precision_test_mean', 0.0),
+                        f"{model_type}_n_features": model_results.get('n_features', 0)
+                    })
+                    
+                    # 记录特征重要性
+                    if 'feature_importance' in model_results and 'feature_names' in model_results:
+                        wandb_logger.log_feature_importance(
+                            model_results['feature_names'],
+                            model_results['feature_importance'],
+                            title=f"{model_type.title()} Feature Importance (Improved)"
+                        )
+        else:
+            logger.info("📊 使用原始基线模型...")
+            traditional_results = run_baseline_comparison(
+                training_data, 
+                output_dir,
+                models=["random_forest", "xgboost"]
+            )
+            
+            # 记录传统ML结果到WandB
+            for model_type, model_results in traditional_results.items():
+                if 'error' not in model_results and 'test_metrics' in model_results:
+                    tm = model_results['test_metrics']
+                    wandb_logger.log_metrics({
+                        f"{model_type}_test_f1": tm.get('f1', 0.0),
+                        f"{model_type}_test_auc": tm.get('auc', 0.0),
+                        f"{model_type}_test_accuracy": tm.get('accuracy', 0.0),
+                        f"{model_type}_test_precision": tm.get('precision', 0.0),
+                        f"{model_type}_test_recall": tm.get('recall', 0.0),
+                        f"{model_type}_test_fpr": tm.get('fpr', 0.0) # 假设fpr已计算
+                    })
+                    
+                    # 记录特征重要性
+                    if 'feature_importance' in model_results and 'feature_names' in model_results:
+                        wandb_logger.log_feature_importance(
+                            model_results['feature_names'],
+                            model_results['feature_importance'],
+                            title=f"{model_type.title()} Feature Importance"
+                        )
+                    
+                    # 记录ROC曲线 (如果数据存在)
+                    if 'y_true' in tm and 'y_pred_proba' in tm and \
+                       isinstance(tm['y_true'], np.ndarray) and isinstance(tm['y_pred_proba'], np.ndarray) and \
+                       len(tm['y_true']) > 0 and len(tm['y_pred_proba']) > 0 and \
+                       tm['y_pred_proba'].ndim == 2 and tm['y_pred_proba'].shape[1] >=2: # Ensure proba has at least 2 classes for ROC
+                        try:
+                            wandb_logger.log_roc_curve(tm['y_true'], tm['y_pred_proba'], title=f"{model_type.title()} ROC Curve")
+                        except Exception as e_roc:
+                            logger.warning(f"WandB: 绘制 {model_type} ROC曲线失败: {e_roc}")
         
         results['models'].update(traditional_results)
         
@@ -480,6 +524,18 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
                         metrics_to_log['recall'] = 0.0
                         metrics_to_log['accuracy'] = 0.0
                         metrics_to_log['fpr'] = 0.0
+                elif 'cv_results' in model_result:
+                    # 改进版基线模型使用交叉验证结果
+                    cv_results = model_result['cv_results']
+                    metrics_to_log['f1_score'] = cv_results.get('f1_test_mean', 0.0)
+                    metrics_to_log['auc_score'] = cv_results.get('roc_auc_test_mean', 0.0)
+                    metrics_to_log['precision'] = cv_results.get('precision_test_mean', 0.0)
+                    metrics_to_log['recall'] = cv_results.get('recall_test_mean', 0.0)
+                    metrics_to_log['accuracy'] = cv_results.get('accuracy_test_mean', 0.0)
+                    metrics_to_log['fpr'] = 0.0  # 改进版模型暂不计算FPR
+                    metrics_to_log['pr_auc'] = cv_results.get('average_precision_test_mean', 0.0)
+                    metrics_to_log['n_features'] = model_result.get('n_features', 0)
+                    metrics_to_log['model_type'] = 'improved_baseline'
                 else:
                     # 传统ML模型使用测试分数
                     test_metrics = model_result.get('test_metrics', {})
@@ -489,6 +545,7 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
                     metrics_to_log['recall'] = test_metrics.get('recall', 0.0)
                     metrics_to_log['accuracy'] = test_metrics.get('accuracy', 0.0)
                     metrics_to_log['fpr'] = test_metrics.get('fpr', 0.0)
+                    metrics_to_log['model_type'] = 'original_baseline'
                 
                 comparison_summary[model_name] = metrics_to_log
         
@@ -504,13 +561,21 @@ def run_baseline_experiment(config: Config, output_dir: str, logger: logging.Log
         logger.info("✅ 基线对比实验完成")
         logger.info("📈 模型性能对比:")
         for model_name, metrics_dict in comparison_summary.items():
-            log_str = f"   {model_name}: "
+            model_type_info = metrics_dict.get('model_type', 'unknown')
+            log_str = f"   {model_name} ({model_type_info}): "
             log_str += f"F1={metrics_dict.get('f1_score', 0.0):.4f}, "
             log_str += f"AUC={metrics_dict.get('auc_score', 0.0):.4f}, "
             log_str += f"Precision={metrics_dict.get('precision', 0.0):.4f}, "
             log_str += f"Recall={metrics_dict.get('recall', 0.0):.4f}, "
-            log_str += f"Accuracy={metrics_dict.get('accuracy', 0.0):.4f}, "
-            log_str += f"FPR={metrics_dict.get('fpr', 0.0):.4f}"
+            log_str += f"Accuracy={metrics_dict.get('accuracy', 0.0):.4f}"
+            
+            # 为改进版baseline添加额外信息
+            if model_type_info == 'improved_baseline':
+                log_str += f", PR-AUC={metrics_dict.get('pr_auc', 0.0):.4f}"
+                log_str += f", Features={metrics_dict.get('n_features', 0)}"
+            elif model_type_info == 'original_baseline':
+                log_str += f", FPR={metrics_dict.get('fpr', 0.0):.4f}"
+            
             logger.info(log_str)
         
         return results
@@ -1160,6 +1225,12 @@ def main():
     parser.add_argument('--seed', type=int, default=42,
                        help='随机种子')
     
+    # 改进版基线模型参数
+    parser.add_argument('--use_improved_baseline', action='store_true',
+                       help='使用改进版基线模型（差异化特征工程和交叉验证）')
+    parser.add_argument('--baseline_cv_folds', type=int, default=5,
+                       help='基线模型交叉验证折数')
+    
     args = parser.parse_args()
     
     # 生成实验名称
@@ -1190,7 +1261,9 @@ def main():
             num_layers=args.num_layers,
             num_cores=args.num_cores,
             seed=args.seed,
-            n_trials=args.n_trials
+            n_trials=args.n_trials,
+            use_improved_baseline=args.use_improved_baseline,
+            baseline_cv_folds=args.baseline_cv_folds
         )
         
         logger.info(f"🎯 开始实验: {args.experiment_name}")

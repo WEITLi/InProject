@@ -231,7 +231,52 @@ print(f"实验结果将保存到: {drive_results_path}")
     --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 或其他适合基线的run_type
 ```
 
-#### 5. 不平衡数据处理实验 (使用不平衡配置)
+#### 5. 改进版基线模型实验 (推荐)
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+# 使用改进版baseline模型，具有差异化特征工程和交叉验证
+!python main_experiment.py \
+    --run_type "baseline" \
+    --use_improved_baseline \
+    --baseline_cv_folds 5 \
+    --max_users 100 \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs"
+```
+
+#### 6. 改进版基线模型对比实验
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+# 先运行原始baseline
+!python main_experiment.py \
+    --run_type "baseline" \
+    --max_users 100 \
+    --experiment_name "original_baseline_comparison" \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs"
+
+# 再运行改进版baseline
+!python main_experiment.py \
+    --run_type "baseline" \
+    --use_improved_baseline \
+    --baseline_cv_folds 5 \
+    --max_users 100 \
+    --experiment_name "improved_baseline_comparison" \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs"
+```
+
+#### 7. 使用专用改进版baseline脚本
+```python
+%env MPLBACKEND=Agg
+%cd /content/Mycert
+# 使用专门的改进版baseline运行脚本
+!python run_improved_baseline.py \
+    --max_users 200 \
+    --baseline_cv_folds 10 \
+    --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs"
+```
+
+#### 8. 不平衡数据处理实验 (使用不平衡配置)
 ```python
 %env MPLBACKEND=Agg
 %cd /content/Mycert
@@ -241,7 +286,7 @@ print(f"实验结果将保存到: {drive_results_path}")
     --output_dir "/content/drive/MyDrive/experiment_results/Mycert_outputs" # 或其他适合的run_type
 ```
 
-#### 6. 快速测试 (使用快速测试配置)
+#### 9. 快速测试 (使用快速测试配置)
 ```python
 %env MPLBACKEND=Agg
 %cd /content/Mycert
